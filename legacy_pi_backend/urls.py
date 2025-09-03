@@ -16,8 +16,16 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from django.conf import settings
+from django.conf.urls.static import static
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/crawler/', include('crawler.urls')),
+    path('api/ai/', include('ai_interpreter.urls')),
+    path('api/tts/', include('tts_service.urls')),
 ]
+
+# 开发环境媒体文件服务
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

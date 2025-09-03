@@ -15,4 +15,6 @@ urlpatterns = [
     
     # 图片API：获取缓存的图片
     path('image/<str:image_id>/', views.get_cached_image, name='cached_image'),
+    
+
 ]

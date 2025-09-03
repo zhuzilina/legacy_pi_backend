@@ -276,3 +276,4 @@ def get_cached_image(request, image_id):
     except Exception as e:
         logger.error(f"获取缓存图片失败: {str(e)}")
         return HttpResponse(f'获取图片失败: {str(e)}', status=500, content_type='text/plain; charset=utf-8')
+

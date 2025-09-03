@@ -194,10 +194,9 @@ class PeopleNetCrawler:
             
             # 尝试多个可能的今日要闻页面
             possible_urls = [
-                "http://www.people.com.cn/GB/59476/index.html",
-                "http://www.people.com.cn/GB/59476/",
+                "http://www.people.com.cn/GB/59476/",  # 最有效的URL，放在首位
                 "http://www.people.com.cn/GB/",
-                "http://www.people.com.cn/GB/59476/index1.html"
+                "http://www.people.com.cn/GB/59476/index.html"  # 会重定向，放在最后
             ]
             
             for url in possible_urls:
