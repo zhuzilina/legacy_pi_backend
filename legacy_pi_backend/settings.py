@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -23,7 +24,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-h^1l%premi0!2g%^h)h$#(8j$zr%p-#e7k#klu6$8jsmey2x(l'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
 
 ALLOWED_HOSTS = ['*']
 
@@ -41,6 +42,9 @@ INSTALLED_APPS = [
     'crawler',
     'ai_interpreter',
     'tts_service',
+    'ai_chat',
+    'knowledge_quiz',
+    'md_docs',
 ]
 
 MIDDLEWARE = [
@@ -120,6 +124,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 # Media files (User uploaded files)
 MEDIA_URL = '/media/'
@@ -170,6 +175,14 @@ CORS_ALLOW_METHODS = [
 CORS_ALLOW_CREDENTIALS = True
 
 # Redis配置
-REDIS_HOST = 'localhost'
-REDIS_PORT = 6379
-REDIS_DB = 0
+REDIS_HOST = os.environ.get('REDIS_HOST', 'localhost')
+REDIS_PORT = int(os.environ.get('REDIS_PORT', 6379))
+REDIS_DB = int(os.environ.get('REDIS_DB', 0))
+REDIS_PASSWORD = os.environ.get('REDIS_PASSWORD', 'redis123')
+
+# MongoDB配置
+MONGODB_HOST = os.environ.get('MONGODB_HOST', 'localhost')
+MONGODB_PORT = int(os.environ.get('MONGODB_PORT', 27017))
+MONGODB_USERNAME = os.environ.get('MONGODB_USERNAME', 'admin')
+MONGODB_PASSWORD = os.environ.get('MONGODB_PASSWORD', 'password123')
+MONGODB_DATABASE = os.environ.get('MONGODB_DATABASE', 'md_docs')

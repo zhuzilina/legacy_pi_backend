@@ -1,11 +1,11 @@
 """
 AI解读服务
-使用OpenAI SDK调用大模型API进行文本解读
+使用方舟 SDK调用大模型API进行文本解读
 """
 
 import logging
 from typing import Dict, Any, Optional
-from openai import OpenAI
+from volcenginesdkarkruntime import Ark
 from .config import AI_MODEL_CONFIG, INTERPRETATION_PROMPTS
 
 logger = logging.getLogger(__name__)
@@ -15,10 +15,7 @@ class AIInterpreterService:
     
     def __init__(self):
         """初始化AI解读服务"""
-        self.client = OpenAI(
-            api_key=AI_MODEL_CONFIG['api_key'],
-            base_url=AI_MODEL_CONFIG['base_url'],
-        )
+        self.client = Ark(api_key=AI_MODEL_CONFIG['api_key'])
         self.model = AI_MODEL_CONFIG['model']
     
     def interpret_text(self, 
@@ -127,7 +124,7 @@ class AIInterpreterService:
             return {
                 'status': 'healthy',
                 'model': self.model,
-                'base_url': AI_MODEL_CONFIG['base_url'],
+                'api_key_configured': bool(AI_MODEL_CONFIG['api_key']),
                 'response_time': 'normal'
             }
             
@@ -137,7 +134,7 @@ class AIInterpreterService:
                 'status': 'unhealthy',
                 'error': str(e),
                 'model': self.model,
-                'base_url': AI_MODEL_CONFIG['base_url']
+                'api_key_configured': bool(AI_MODEL_CONFIG['api_key'])
             }
 
 # 创建全局服务实例

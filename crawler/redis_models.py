@@ -220,11 +220,18 @@ class RedisCrawlTask:
     def update(self, **kwargs):
         """更新任务"""
         try:
+            # 处理datetime对象，转换为ISO格式
+            processed_kwargs = {}
             for key, value in kwargs.items():
                 if hasattr(self, key):
                     setattr(self, key, value)
+                    # 如果是datetime对象，转换为ISO格式
+                    if isinstance(value, datetime):
+                        processed_kwargs[key] = value.isoformat()
+                    else:
+                        processed_kwargs[key] = value
             
-            return redis_service.update_task(self.id, kwargs)
+            return redis_service.update_task(self.id, processed_kwargs)
             
         except Exception as e:
             logger.error(f"更新任务失败: {str(e)}")

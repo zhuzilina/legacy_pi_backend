@@ -278,5 +278,3 @@ demo_*.py
 *_test.py
 *_debug.py
 *_demo.py
-
-/doc/*
