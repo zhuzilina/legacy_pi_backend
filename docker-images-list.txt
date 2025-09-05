@@ -1,0 +1,64 @@
+# Legacy PI Backend Docker 镜像清单
+# 用于离线部署到无法访问 Docker 仓库的云端环境
+
+# ===========================================
+# 基础镜像列表
+# ===========================================
+
+# Python 基础镜像 (用于构建 Django 应用)
+python:3.12-slim
+
+# Redis 缓存服务
+redis:7.2-alpine
+
+# MongoDB 数据库服务
+mongo:7.0
+
+# Nginx Web 服务器
+nginx:alpine
+
+# ===========================================
+# 镜像大小估算 (仅供参考)
+# ===========================================
+# python:3.12-slim     ~ 120MB
+# redis:7.2-alpine     ~ 15MB
+# mongo:7.0            ~ 700MB
+# nginx:alpine         ~ 25MB
+# 总计: ~ 860MB (基础镜像)
+# 
+# 自定义 Django 镜像: ~ 500MB (包含所有依赖)
+# 总大小: ~ 1.4GB
+
+# ===========================================
+# 镜像用途说明
+# ===========================================
+# python:3.12-slim  -> 构建 legacy_pi_backend_django-app (自定义镜像)
+# redis:7.2-alpine  -> Redis 缓存服务
+# mongo:7.0         -> MongoDB 数据库服务  
+# nginx:alpine      -> Nginx 反向代理和静态文件服务
+
+# ===========================================
+# 导出命令示例
+# ===========================================
+# docker pull python:3.12-slim
+# docker pull redis:7.2-alpine
+# docker pull mongo:7.0
+# docker pull nginx:alpine
+# 
+# docker save -o python-3.12-slim.tar python:3.12-slim
+# docker save -o redis-7.2-alpine.tar redis:7.2-alpine
+# docker save -o mongo-7.0.tar mongo:7.0
+# docker save -o nginx-alpine.tar nginx:alpine
+# 
+# # 构建并导出自定义 Django 镜像
+# docker-compose -f docker-compose.prod.yml build django-app
+# docker save -o legacy-pi-django-app.tar legacy_pi_backend_django-app
+
+# ===========================================
+# 导入命令示例
+# ===========================================
+# docker load -i python-3.12-slim.tar
+# docker load -i redis-7.2-alpine.tar
+# docker load -i mongo-7.0.tar
+# docker load -i nginx-alpine.tar
+# docker load -i legacy-pi-django-app.tar
