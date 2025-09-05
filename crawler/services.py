@@ -41,7 +41,7 @@ class PeopleNetCrawler:
             if task_id:
                 task = RedisCrawlTask.get(task_id)
                 if task:
-                    task.update(status='running', started_at=timezone.now())
+                    task.update(status='running', started_at=timezone.now().isoformat())
             
             logger.info("开始爬取今日要闻")
             
@@ -94,7 +94,7 @@ class PeopleNetCrawler:
             if task_id:
                 task.update(
                     status='completed',
-                    completed_at=timezone.now(),
+                    completed_at=timezone.now().isoformat(),
                     success_count=success_count,
                     failed_count=failed_count
                 )
@@ -117,7 +117,7 @@ class PeopleNetCrawler:
                 task.update(
                     status='failed',
                     error_message=error_msg,
-                    completed_at=timezone.now()
+                    completed_at=timezone.now().isoformat()
                 )
             
             return {
@@ -289,35 +289,9 @@ class PeopleNetCrawler:
             except Exception as e:
                 logger.debug(f"无法获取文章网页内容: {link_info['title']} - {str(e)}")
             
-            # 如果无法从网站获取，尝试使用本地HTML文件
+            # 如果无法从网站获取内容，跳过这篇文章
             if soup is None:
-                # 根据标题匹配本地文件
-                local_files = [
-                    "前7月中国自非洲最不发达国家进口额增长10.2% --经济·科技--人民网.html",
-                    "羽毛球世锦赛国羽斩获2金3银--文旅·体育--人民网.html"
-                ]
-                
-                # 尝试匹配标题关键词
-                matched_file = None
-                title = link_info['title']
-                if "非洲" in title or "进口" in title or "10.2%" in title:
-                    matched_file = local_files[0]
-                elif "羽毛球" in title or "世锦赛" in title or "国羽" in title:
-                    matched_file = local_files[1]
-                else:
-                    # 如果没有匹配，使用第一个文件作为示例
-                    matched_file = local_files[0]
-                
-                try:
-                    with open(matched_file, 'r', encoding='utf-8') as f:
-                        html_content = f.read()
-                    soup = BeautifulSoup(html_content, 'html.parser')
-                    logger.info(f"使用本地文件处理文章: {matched_file}")
-                except FileNotFoundError:
-                    logger.warning(f"本地文件不存在: {matched_file}")
-                    return None
-            
-            if soup is None:
+                logger.warning(f"无法获取文章内容，跳过: {link_info['title']}")
                 return None
             
             # 提取文章信息
@@ -505,17 +479,29 @@ class PeopleNetCrawler:
                             constructed_url = f"http://paper.people.com.cn/rmrb/pc/pic/202509/01/{filename}"
                         
                         logger.debug(f"本地相对路径转换: {src} -> {constructed_url}")
-                        image_id, content_type = image_cache_service.download_and_cache_image(constructed_url, self.base_url)
+                        try:
+                            image_id, content_type = image_cache_service.download_and_cache_image(constructed_url, self.base_url)
+                        except Exception as e:
+                            logger.warning(f"图片下载失败: {constructed_url} - {str(e)}")
+                            image_id, content_type = None, None
                         
                         # 如果第一次尝试失败，尝试其他模式
                         if not image_id and filename.startswith('MAIN'):
                             # 尝试直接使用原始路径构造
                             alt_url = f"http://www.people.com.cn/mediafile/pic/{filename}"
                             logger.debug(f"尝试备选路径: {alt_url}")
-                            image_id, content_type = image_cache_service.download_and_cache_image(alt_url, self.base_url)
+                            try:
+                                image_id, content_type = image_cache_service.download_and_cache_image(alt_url, self.base_url)
+                            except Exception as e:
+                                logger.warning(f"备选图片下载失败: {alt_url} - {str(e)}")
+                                image_id, content_type = None, None
                             
                     else:
-                        image_id, content_type = image_cache_service.download_and_cache_image(src, self.base_url)
+                        try:
+                            image_id, content_type = image_cache_service.download_and_cache_image(src, self.base_url)
+                        except Exception as e:
+                            logger.warning(f"图片下载失败: {src} - {str(e)}")
+                            image_id, content_type = None, None
                     
                     if image_id:
                         # 使用缓存的图片ID

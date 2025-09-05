@@ -23,7 +23,10 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/crawler/', include('crawler.urls')),
     path('api/ai/', include('ai_interpreter.urls')),
+    path('api/ai-chat/', include('ai_chat.urls')),
     path('api/tts/', include('tts_service.urls')),
+    path('api/knowledge-quiz/', include('knowledge_quiz.urls')),
+    path('api/md-docs/', include('md_docs.urls')),
 ]
 
 # 开发环境媒体文件服务

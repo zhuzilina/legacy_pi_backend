@@ -11,12 +11,19 @@ class RedisService:
     """Redis服务类，用于管理爬虫数据的缓存"""
     
     def __init__(self):
-        self.redis_client = redis.Redis(
-            host=getattr(settings, 'REDIS_HOST', 'localhost'),
-            port=getattr(settings, 'REDIS_PORT', 6379),
-            db=getattr(settings, 'REDIS_DB', 0),
-            decode_responses=True
-        )
+        redis_config = {
+            'host': getattr(settings, 'REDIS_HOST', 'localhost'),
+            'port': getattr(settings, 'REDIS_PORT', 6379),
+            'db': getattr(settings, 'REDIS_DB', 0),
+            'decode_responses': True
+        }
+        
+        # 如果配置了密码，则添加密码认证
+        redis_password = getattr(settings, 'REDIS_PASSWORD', None)
+        if redis_password:
+            redis_config['password'] = redis_password
+        
+        self.redis_client = redis.Redis(**redis_config)
         
     def test_connection(self):
         """测试Redis连接"""
