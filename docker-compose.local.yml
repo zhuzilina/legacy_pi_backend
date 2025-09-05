@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7.2-alpine
+    container_name: legacy_pi_redis_local
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass redis123
+    volumes:
+      - redis_data:/data
+    networks:
+      - legacy_pi_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis123", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  mongodb:
+    image: mongo:7.0
+    container_name: legacy_pi_mongodb_local
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password123
+      MONGO_INITDB_DATABASE: md_docs
+    volumes:
+      - mongodb_data:/data/db
+      - ./mongo-init:/docker-entrypoint-initdb.d
+    networks:
+      - legacy_pi_network
+
+  django-app:
+    build: 
+      context: .
+      dockerfile: Dockerfile.prod
+    container_name: legacy_pi_django_local
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=False
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - REDIS_PASSWORD=redis123
+      - MONGODB_HOST=mongodb
+      - MONGODB_PORT=27017
+      - MONGODB_USERNAME=admin
+      - MONGODB_PASSWORD=password123
+      - MONGODB_DATABASE=md_docs
+      - ARK_API_KEY=${ARK_API_KEY:-your_api_key_here}
+      - ALLOWED_HOSTS=localhost,127.0.0.1
+      - CORS_ALLOWED_ORIGINS=http://localhost,http://127.0.0.1
+    volumes:
+      - ./media:/app/media
+      - ./static:/app/static
+      - ./logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+    networks:
+      - legacy_pi_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/ai-chat/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  mongodb_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  legacy_pi_network:
+    driver: bridge
