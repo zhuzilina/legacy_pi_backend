@@ -24,17 +24,13 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-# 配置 pip 使用国内加速镜像
-RUN python -m pip install --upgrade pip && \
-    pip config set global.index-url https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple && \
-    pip config set global.trusted-host mirrors.tuna.tsinghua.edu.cn
-
 # 复制 requirements.txt 并安装 Python 依赖
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
 # 安装 Gunicorn WSGI 服务器
-RUN pip install --no-cache-dir gunicorn
+RUN pip install gunicorn
 
 # 复制项目文件
 COPY . .

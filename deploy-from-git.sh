@@ -30,7 +30,7 @@ log_error() {
 }
 
 # 默认配置
-DEFAULT_GIT_URL="https://github.com/zhuzilina/legacy_pi_backend.git"
+DEFAULT_GIT_URL="https://github.com/your-username/legacy_pi_backend.git"
 DEFAULT_BRANCH="main"
 PROJECT_DIR="legacy_pi_backend"
 DOCKER_COMPOSE_FILE="docker-compose.prod.yml"
@@ -103,55 +103,13 @@ clone_or_update_project() {
     log_success "项目代码准备完成"
 }
 
-# 检查镜像是否已存在
-check_images_exist() {
-    log_info "检查 Docker 镜像是否已存在..."
-    
-    # 检查基础镜像是否已存在
-    if docker images | grep -q "python.*3.12-slim" && \
-       docker images | grep -q "nginx.*alpine" && \
-       docker images | grep -q "redis.*7.2-alpine" && \
-       docker images | grep -q "mongo.*7.0"; then
-        log_success "基础镜像已存在，跳过导入"
-        return 0
-    else
-        log_info "基础镜像不存在，需要导入"
-        return 1
-    fi
-}
-
 # 导入基础镜像
 import_base_images() {
     log_info "导入基础 Docker 镜像..."
     
-    # 首先检查镜像是否已存在
-    if check_images_exist; then
-        return 0
-    fi
-    
     # 检查是否有镜像文件
-    if [ -d "docker-base-images" ]; then
-        log_info "发现基础镜像文件，开始导入..."
-        cd docker-base-images
-        
-        if [ -f "import-base-images.sh" ]; then
-            ./import-base-images.sh
-        else
-            log_warning "导入脚本不存在，手动导入镜像..."
-            
-            # 手动导入镜像
-            for image_file in *.tar.gz; do
-                if [ -f "$image_file" ]; then
-                    log_info "导入 $image_file..."
-                    gunzip -c "$image_file" | docker load
-                fi
-            done
-        fi
-        
-        cd ..
-        log_success "基础镜像导入完成"
-    elif [ -d "docker-images" ]; then
-        log_info "发现完整镜像文件，开始导入..."
+    if [ -d "docker-images" ]; then
+        log_info "发现镜像文件，开始导入..."
         cd docker-images
         
         if [ -f "import-images.sh" ]; then
@@ -169,7 +127,7 @@ import_base_images() {
         fi
         
         cd ..
-        log_success "镜像导入完成"
+        log_success "基础镜像导入完成"
     else
         log_warning "未找到镜像文件，尝试从 Docker Hub 拉取..."
         pull_base_images
@@ -193,21 +151,12 @@ pull_base_images() {
 configure_environment() {
     log_info "配置环境变量..."
     
-    # 确保在项目目录中
-    if [ ! -f "manage.py" ]; then
-        log_error "当前不在项目根目录，请检查路径"
-        exit 1
-    fi
-    
-    # 检查环境配置文件
     if [ ! -f "env.production" ]; then
         if [ -f "env.example" ]; then
             cp env.example env.production
             log_warning "已创建 env.production 文件，请编辑配置"
         else
-            log_error "未找到环境配置文件模板 env.example"
-            log_info "当前目录文件列表:"
-            ls -la
+            log_error "未找到环境配置文件模板"
             exit 1
         fi
     fi
@@ -353,12 +302,10 @@ main() {
     # 克隆或更新项目
     clone_or_update_project
     
-    # 导入基础镜像 (在项目目录外执行)
-    cd ..
+    # 导入基础镜像
     import_base_images
-    cd "$PROJECT_DIR"
     
-    # 配置环境变量 (在项目目录内执行)
+    # 配置环境变量
     configure_environment
     
     # 构建 Django 应用
