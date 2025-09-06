@@ -451,32 +451,7 @@ location ~* \.(css|js|png|jpg|jpeg|gif|ico|svg)$ {
 
 ## 📄 许可证
 
-本项目采用 Apache License 2.0 许可证。
-
-### 许可证摘要
-
-**Apache License 2.0** 是一个宽松的开源许可证，允许您：
-
-- ✅ **自由使用** - 商业和非商业用途
-- ✅ **修改代码** - 创建衍生作品
-- ✅ **分发软件** - 以源代码或二进制形式分发
-- ✅ **专利保护** - 包含专利授权条款
-- ✅ **私有使用** - 无需公开修改后的代码
-
-### 主要要求
-
-- 📋 **保留版权声明** - 必须保留原始版权和许可证声明
-- 📋 **包含许可证** - 分发时必须包含 Apache License 2.0 全文
-- 📋 **声明修改** - 修改的文件必须声明已更改
-- 📋 **NOTICE 文件** - 如果存在 NOTICE 文件，必须包含在分发中
-
-### 完整许可证
-
-查看完整的许可证条款：[LICENSE](LICENSE) 文件
-
-**版权信息**: Copyright 2025 榆见晴天
-
-**许可证链接**: [http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0)
+本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情
 
 ## 📞 支持与联系
 
