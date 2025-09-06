@@ -7,7 +7,6 @@ AI对话服务
 import logging
 from typing import Dict, Any, List, Optional
 from volcenginesdkarkruntime import Ark
-from django.utils import timezone
 from .config import AI_MODEL_CONFIG, CHAT_SYSTEM_PROMPTS, CHAT_CONFIG, IMAGE_PROMPTS
 from .image_service import ai_image_service
 
@@ -317,19 +316,27 @@ class AIChatService:
     
     def health_check(self) -> Dict[str, Any]:
         """
-        健康检查，测试服务状态
+        健康检查，测试API连接
         
         Returns:
             健康状态信息
         """
         try:
-            # 基本健康检查，不调用外部 API
+            # 发送一个简单的测试请求
+            completion = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "你是一个测试助手"},
+                    {"role": "user", "content": "你好"}
+                ],
+                max_tokens=10
+            )
+            
             return {
                 'status': 'healthy',
                 'model': self.model,
                 'api_key_configured': bool(AI_MODEL_CONFIG['api_key']),
-                'service': 'ai_chat',
-                'timestamp': timezone.now().isoformat()
+                'response_time': 'normal'
             }
             
         except Exception as e:
@@ -338,9 +345,7 @@ class AIChatService:
                 'status': 'unhealthy',
                 'error': str(e),
                 'model': self.model,
-                'api_key_configured': bool(AI_MODEL_CONFIG['api_key']),
-                'service': 'ai_chat',
-                'timestamp': timezone.now().isoformat()
+                'api_key_configured': bool(AI_MODEL_CONFIG['api_key'])
             }
 
 
