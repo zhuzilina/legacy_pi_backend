@@ -12,8 +12,6 @@ services:
       - redis_data:/data
     networks:
       - legacy_pi_network
-    env_file:
-      - env.production
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 30s
@@ -35,8 +33,6 @@ services:
       - ./mongo-init:/docker-entrypoint-initdb.d
     networks:
       - legacy_pi_network
-    env_file:
-      - env.production
 
   django-app:
     build: 
@@ -72,8 +68,6 @@ services:
         condition: service_started
     networks:
       - legacy_pi_network
-    env_file:
-      - env.production
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/ai-chat/health/"]
       interval: 30s
