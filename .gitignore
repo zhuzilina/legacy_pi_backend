@@ -278,16 +278,3 @@ demo_*.py
 *_test.py
 *_debug.py
 *_demo.py
-
-# Docker 镜像文件
-docker-images/
-docker-base-images/
-*.tar.gz
-legacy_pi_backend_deployment/
-legacy_pi_backend_git_deployment/
-
-# 部署相关文件
-DEPLOYMENT_*.md
-GIT_*.md
-TRANSFER_*.md
-IMAGES_*.md
