@@ -52,6 +52,7 @@ MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.locale.LocaleMiddleware',  # 添加国际化中间件
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -112,13 +113,15 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = 'zh-hans'  # 设置为简体中文
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Shanghai'  # 设置为中国时区
 
-USE_I18N = True
+USE_I18N = True  # 启用国际化
 
-USE_TZ = True
+USE_L10N = True  # 启用本地化
+
+USE_TZ = True  # 使用时区
 
 
 # Static files (CSS, JavaScript, Images)

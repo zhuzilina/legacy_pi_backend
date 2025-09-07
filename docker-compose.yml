@@ -38,8 +38,8 @@ services:
     build: .
     container_name: legacy_pi_django
     restart: unless-stopped
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     environment:
       - DEBUG=False
       - REDIS_HOST=redis
@@ -55,6 +55,7 @@ services:
     volumes:
       - ./media:/app/media
       - ./static:/app/static
+      - ./uwsgi.ini:/app/uwsgi.ini
     depends_on:
       redis:
         condition: service_healthy
@@ -63,11 +64,34 @@ services:
     networks:
       - legacy_pi_network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/ai-chat/health/"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/ai-chat/health/')"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: legacy_pi_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./staticfiles:/app/staticfiles:ro
+      - ./media:/app/media:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      django-app:
+        condition: service_started
+    networks:
+      - legacy_pi_network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/api/ai-chat/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   mongo-express:
     image: mongo-express:1.0.0
@@ -90,6 +114,8 @@ volumes:
   mongodb_data:
     driver: local
   redis_data:
+    driver: local
+  nginx_logs:
     driver: local
 
 networks:

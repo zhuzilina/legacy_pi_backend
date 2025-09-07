@@ -4,6 +4,8 @@
 
 Legacy PI Backend 是一个基于 Django 的智能内容处理平台，集成了多种 AI 服务和内容管理功能。项目采用微服务架构，支持容器化部署，提供完整的 API 服务套件。
 
+**🚀 最新架构**: 采用 uWSGI + Nginx 高性能架构，支持多进程并发处理，具备完整的性能优化和缓存机制。
+
 ## ✨ 核心功能
 
 ### 🤖 AI 智能服务
@@ -19,22 +21,27 @@ Legacy PI Backend 是一个基于 Django 的智能内容处理平台，集成了
 - **文档摘要** - 智能提取文档关键信息
 
 ### 🔧 技术特性
+- **高性能架构** - uWSGI + Nginx 多进程并发处理
 - **容器化部署** - 完整的 Docker Compose 配置
 - **微服务架构** - 模块化设计，易于扩展
 - **Redis 缓存** - 高性能数据缓存
 - **MongoDB 存储** - 灵活的文档数据库
 - **RESTful API** - 标准化的 API 接口
+- **Gzip 压缩** - 动态内容压缩优化
+- **静态文件优化** - Nginx 高效静态文件服务
+- **中文化界面** - Django管理后台完全中文化
 
 ## 🏗️ 系统架构
 
 ### 服务组件
 
-| 服务 | 描述 | 端口 |
-|------|------|------|
-| Django 应用 | 主应用服务 | 8000 |
-| Redis 缓存 | 数据缓存服务 | 6379 |
-| MongoDB | 文档数据库 | 27017 |
-| Mongo Express | 数据库管理界面 | 8081 |
+| 服务 | 描述 | 端口 | 状态 |
+|------|------|------|------|
+| **Nginx** | 反向代理和静态文件服务 | 80, 443 | ✅ 生产就绪 |
+| **Django + uWSGI** | 主应用服务 | 8000 (内部) | ✅ 多进程并发 |
+| **Redis 缓存** | 数据缓存服务 | 6379 | ✅ 高性能缓存 |
+| **MongoDB** | 文档数据库 | 27017 | ✅ 文档存储 |
+| **Mongo Express** | 数据库管理界面 | 8081 | ✅ 管理界面 |
 
 ### 应用模块
 
@@ -44,6 +51,7 @@ Legacy PI Backend 是一个基于 Django 的智能内容处理平台，集成了
 - **tts_service** - 文本转语音服务
 - **knowledge_quiz** - 知识问答系统
 - **md_docs** - Markdown 文档管理
+- **knowledge_ai** - 知识AI服务
 
 ## 🚀 快速开始
 
@@ -73,33 +81,44 @@ export ARK_API_KEY="你的火山方舟API密钥"
 # 检查服务状态
 docker-compose ps
 
-# 测试 API 健康状态
-curl http://localhost:8000/api/ai-chat/health/
+# 测试 API 健康状态 (通过Nginx代理)
+curl http://localhost/api/ai-chat/health/
+
+# 测试管理后台
+curl http://localhost/admin/
+
+# 运行所有测试
+cd tests/
+./run_all_tests.sh --all
+
+# 测试管理后台中文化
+python3 test_admin_chinese.py
 ```
 
 ## 📖 API 文档
 
 ### 主要 API 端点
 
-| 服务 | 端点 | 描述 |
-|------|------|------|
-| AI 对话 | `/api/ai-chat/` | 智能对话和图片理解 |
-| AI 解读 | `/api/ai/` | 文本解读和分析 |
-| 内容爬取 | `/api/crawler/` | 新闻内容爬取 |
-| 文档管理 | `/api/md-docs/` | Markdown 文档管理 |
-| 知识问答 | `/api/knowledge-quiz/` | 知识管理和问答 |
-| 语音合成 | `/api/tts/` | 文本转语音 |
+| 服务 | 端点 | 描述 | 状态 |
+|------|------|------|------|
+| **AI 对话** | `/api/ai-chat/` | 智能对话和图片理解 | ✅ 生产就绪 |
+| **AI 解读** | `/api/ai/` | 文本解读和分析 | ✅ 生产就绪 |
+| **内容爬取** | `/api/crawler/` | 新闻内容爬取 | ✅ 生产就绪 |
+| **文档管理** | `/api/md-docs/` | Markdown 文档管理 | ✅ 生产就绪 |
+| **知识问答** | `/api/knowledge-quiz/` | 知识管理和问答 | ✅ 生产就绪 |
+| **语音合成** | `/api/tts/` | 文本转语音 | ✅ 生产就绪 |
+| **知识AI** | `/api/knowledge-ai/` | 知识AI服务 | ✅ 生产就绪 |
 
 ### 快速测试
 
 ```bash
-# AI 对话测试
-curl -X POST "http://localhost:8000/api/ai-chat/chat/" \
+# AI 对话测试 (通过Nginx代理)
+curl -X POST "http://localhost/api/ai-chat/chat/" \
   -H "Content-Type: application/json" \
   -d '{"message": "你好，请介绍一下人工智能"}'
 
 # 文档解读测试
-curl -X POST "http://localhost:8000/api/ai/interpret/" \
+curl -X POST "http://localhost/api/ai/interpret/" \
   -H "Content-Type: application/json" \
   -d '{"text": "人工智能正在改变世界...", "prompt_type": "summary"}'
 ```
@@ -192,7 +211,7 @@ docker-compose exec redis redis-cli -a redis123 FLUSHALL
 
 ```bash
 # 健康检查
-curl http://localhost:8000/api/ai-chat/health/
+curl http://localhost/api/ai-chat/health/
 docker-compose exec redis redis-cli -a redis123 ping
 docker-compose exec mongodb mongosh --eval "db.runCommand('ping')"
 
@@ -202,18 +221,42 @@ docker stats
 
 ## 📚 详细文档
 
-### 核心文档
-- [Docker 容器化集成说明](doc/README_DOCKER_INTEGRATION.md)
-- [AI 对话 API 使用说明](doc/AI对话API_使用说明.md)
-- [AI 解读 API 完整文档](doc/AI解读API_完整文档.md)
-- [MD 文档管理系统 API](doc/MD_DOCS_API_Documentation.md)
+### 🚀 部署和运维文档
+- [生产环境部署指南](doc/README_PRODUCTION.md) - 完整的生产环境部署说明
+- [Docker 容器化集成说明](doc/README_DOCKER_INTEGRATION.md) - 容器化部署详解
+- [性能优化总结](doc/OPTIMIZATION_SUMMARY.md) - 数据库迁移和Gzip压缩优化
+- [最终状态报告](doc/FINAL_STATUS_REPORT.md) - 部署成功状态报告
 
-### 配置文档
-- [快速配置指南](doc/快速配置指南.md)
-- [环境变量配置说明](doc/环境变量配置说明.md)
-- [知识问答 API 使用说明](doc/知识问答API_使用说明.md)
-- [TTS API 使用说明](doc/TTS_API_使用说明.md)
+### 🔧 配置和测试文档
+- [快速配置指南](doc/快速配置指南.md) - 快速配置说明
+- [环境变量配置说明](doc/环境变量配置说明.md) - 环境变量详解
+- [快速测试指南](doc/快速测试指南.md) - 快速测试说明
+- [AI对话API测试说明](doc/AI_CHAT_API_测试说明.md) - AI对话API测试
 
+### 📖 API 使用文档
+- [API访问指南](doc/API_ACCESS_GUIDE.md) - 所有API端点访问指南
+- [AI对话API使用说明](doc/AI对话API_使用说明.md) - AI对话服务详解
+- [AI解读API完整文档](doc/AI解读API_完整文档.md) - AI解读服务详解
+- [MD文档管理系统API](doc/MD_DOCS_API_Documentation.md) - 文档管理API
+- [知识问答API使用说明](doc/知识问答API_使用说明.md) - 知识问答服务
+- [TTS API使用说明](doc/TTS_API_使用说明.md) - 语音合成服务
+- [知识AI服务API使用说明](doc/知识AI服务API_使用说明.md) - 知识AI服务
+
+### 🛠️ 工具和开发文档
+- [MD文档上传工具指南](doc/MD_UPLOAD_TOOL_GUIDE.md) - MD文档上传工具使用
+- [管理后台访问指南](doc/ADMIN_ACCESS_GUIDE.md) - Django管理后台使用
+- [题目表重构完成报告](doc/题目表重构完成报告.md) - 数据库重构报告
+- [题目ID设计改进建议](doc/题目ID设计改进建议.md) - 题目ID设计优化
+- [知识AI服务说明](doc/README_KNOWLEDGE_AI.md) - 知识AI服务详解
+
+## 🧪 测试文档
+- [测试文件集合](tests/README.md) - 所有测试文件说明和使用指南
+- [测试运行脚本](tests/run_all_tests.sh) - 一键运行所有测试
+- [测试配置文件](tests/test_config.py) - 测试参数和配置管理
+- [测试工具类](tests/test_utils.py) - 通用测试功能工具
+
+## 🌏 国际化配置
+- [Django管理后台中文化配置](doc/DJANGO_ADMIN_CHINESE_CONFIGURATION.md) - 完整的中文化配置指南
 
 ## 🔒 安全特性
 
@@ -222,13 +265,16 @@ docker stats
 - **数据加密** - 敏感数据加密存储
 - **访问控制** - 基于角色的访问控制
 - **审计日志** - 完整的操作审计
+- **安全头部** - Nginx 安全头部配置
 
 ## 🚀 性能优化
 
-- **缓存策略** - Redis 多级缓存
-- **异步处理** - 后台任务异步执行
-- **负载均衡** - 支持多实例部署
-- **资源限制** - 容器资源限制
+- **uWSGI 多进程** - 4进程2线程并发处理
+- **Nginx 反向代理** - 高性能请求代理
+- **Redis 多级缓存** - 高性能数据缓存
+- **Gzip 压缩** - 动态内容压缩优化
+- **静态文件优化** - Nginx 高效静态文件服务
+- **连接池** - 数据库连接池优化
 - **健康检查** - 自动故障恢复
 
 ## 🤝 贡献指南
@@ -276,8 +322,8 @@ docker stats
 
 ---
 
-**版本**: v2.0  
-**更新时间**: 2025-09-05  
-**状态**: ✅ 生产就绪
+**版本**: v3.0  
+**更新时间**: 2025-09-07  
+**状态**: ✅ 生产就绪 (uWSGI + Nginx 架构)
 
 > 🎉 感谢使用 Legacy PI Backend！如有问题，请查看详细文档或提交 Issue。
