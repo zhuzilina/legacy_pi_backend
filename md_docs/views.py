@@ -56,7 +56,7 @@ def get_documents_by_category(request):
             'crawl_date': current_date,
             'total_articles': len(document_ids),
             'article_ids': document_ids,
-            'status': 'cached'
+            'status': 'fresh' if len(document_ids) > 0 else 'empty'
         })
         
     except Exception as e:
