@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     'tts_service',
     'ai_chat',
     'knowledge_quiz',
+    'knowledge_ai',
     'md_docs',
 ]
 
@@ -178,7 +179,7 @@ CORS_ALLOW_CREDENTIALS = True
 REDIS_HOST = os.environ.get('REDIS_HOST', 'localhost')
 REDIS_PORT = int(os.environ.get('REDIS_PORT', 6379))
 REDIS_DB = int(os.environ.get('REDIS_DB', 0))
-REDIS_PASSWORD = os.environ.get('REDIS_PASSWORD', 'redis123')
+REDIS_PASSWORD = os.environ.get('REDIS_PASSWORD', 'FK2emVIbavFWBuUY')  # Docker容器中的实际密码
 
 # MongoDB配置
 MONGODB_HOST = os.environ.get('MONGODB_HOST', 'localhost')

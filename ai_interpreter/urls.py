@@ -14,6 +14,9 @@ urlpatterns = [
     # 批量解读API
     path('batch/', views.batch_interpret, name='batch_interpret'),
     
+    # 流式解读API
+    path('stream/', views.stream_interpret_text, name='stream_interpret_text'),
+    
     # 健康检查API
     path('health/', views.health_check, name='health_check'),
     

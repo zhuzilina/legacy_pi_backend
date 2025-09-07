@@ -6,7 +6,7 @@ from django.core.paginator import Paginator
 from django.db.models import Q
 import json
 import random
-from .models import Knowledge, ChoiceQuestion, FillQuestion, Answer, QuizSession, DailyQuestion
+from .models import Knowledge, Question, Answer, QuizSession, DailyQuestion
 
 
 @csrf_exempt
@@ -159,25 +159,7 @@ def get_daily_question(request):
             pass
         
         # 获取所有题目
-        all_questions = []
-        
-        # 获取选择题
-        choice_questions = list(ChoiceQuestion.objects.all())
-        for q in choice_questions:
-            all_questions.append({
-                'type': 'choice',
-                'question': q,
-                'id': q.id
-            })
-        
-        # 获取填空题
-        fill_questions = list(FillQuestion.objects.all())
-        for q in fill_questions:
-            all_questions.append({
-                'type': 'fill',
-                'question': q,
-                'id': q.id
-            })
+        all_questions = list(Question.objects.all())
         
         if not all_questions:
             return JsonResponse({
@@ -186,9 +168,15 @@ def get_daily_question(request):
             }, status=404)
         
         # 随机选择一道题目
-        selected = random.choice(all_questions)
-        question = selected['question']
-        question_type = selected['type']
+        question = random.choice(all_questions)
+        
+        # 确定题目类型
+        if question.is_choice_question():
+            question_type = 'choice'
+        elif question.is_fill_question():
+            question_type = 'fill'
+        else:
+            question_type = 'unknown'
         
         # 构建题目数据（包含正确答案）
         question_data = {
@@ -205,7 +193,7 @@ def get_daily_question(request):
         if question_type == 'choice':
             # 选择题：包含选项和正确答案
             question_data.update({
-                'choice_type': question.question_type,  # single or multiple
+                'choice_type': question.question_type,  # choice_single or choice_multiple
                 'options': question.get_options_display(),
                 'correct_options': question.get_correct_options(),
             })
@@ -218,8 +206,7 @@ def get_daily_question(request):
         # 保存每日一题记录
         DailyQuestion.objects.create(
             client_ip=client_ip,
-            question_type=question_type,
-            question_id=question.id,
+            question=question,
             question_data=question_data
         )
         

@@ -79,17 +79,18 @@ class OptionsWidget(forms.Textarea):
         return value
 
 
-class ChoiceQuestionForm(forms.ModelForm):
-    """选择题表单"""
+class QuestionForm(forms.ModelForm):
+    """统一题目表单"""
     
     class Meta:
-        from .models import ChoiceQuestion
-        model = ChoiceQuestion
+        from .models import Question
+        model = Question
         fields = '__all__'
         widgets = {
             'options': OptionsWidget(),
             'question_text': forms.Textarea(attrs={'rows': 4, 'cols': 80}),
             'explanation': forms.Textarea(attrs={'rows': 3, 'cols': 80}),
+            'correct_answer': forms.Textarea(attrs={'rows': 2, 'cols': 80}),
         }
     
     def clean_options(self):
@@ -137,7 +138,7 @@ class ChoiceQuestionForm(forms.ModelForm):
             raise forms.ValidationError('至少需要设置一个正确答案')
         
         # 对于单选题，只能有一个正确答案
-        if self.cleaned_data.get('question_type') == 'single' and len(correct_options) > 1:
+        if self.cleaned_data.get('question_type') == 'choice_single' and len(correct_options) > 1:
             raise forms.ValidationError('单选题只能有一个正确答案')
         
         # 返回JSON字符串供模型保存

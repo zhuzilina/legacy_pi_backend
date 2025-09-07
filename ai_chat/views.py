@@ -359,6 +359,8 @@ class ChatView(View):
             'endpoints': {
                 'chat': '/api/ai-chat/chat/',
                 'chat_with_images': '/api/ai-chat/chat-with-images/',
+                'stream_chat': '/api/ai-chat/stream/',
+                'stream_chat_with_images': '/api/ai-chat/stream-with-images/',
                 'upload_image': '/api/ai-chat/upload-image/',
                 'upload_images_batch': '/api/ai-chat/upload-images-batch/',
                 'system_prompts': '/api/ai-chat/prompts/',
@@ -375,7 +377,9 @@ class ChatView(View):
                 '可调节的对话参数',
                 '🖼️ 图片理解功能（支持多图片对话）',
                 '📤 图片上传到Redis缓存',
-                '🎨 多种图片理解提示词风格'
+                '🎨 多种图片理解提示词风格',
+                '⚡ 流式对话支持（Server-Sent Events）',
+                '🔄 实时流式响应'
             ]
         })
     
@@ -387,8 +391,8 @@ class ChatView(View):
 @require_http_methods(["POST"])
 def stream_chat(request):
     """
-    流式AI对话API（实验性功能）
-    支持实时流式响应
+    流式AI对话API
+    支持实时流式响应，使用Server-Sent Events
     """
     try:
         # 解析请求数据
@@ -408,29 +412,42 @@ def stream_chat(request):
         max_tokens = data.get('max_tokens', None)
         temperature = data.get('temperature', None)
         
-        # 注意：这里只是返回普通响应，真正的流式响应需要WebSocket或Server-Sent Events
-        # 为了保持API一致性，这里先返回普通响应
-        result = ai_chat_service.chat(
-            user_message=user_message,
-            conversation_history=conversation_history,
-            system_prompt_type=system_prompt_type,
-            custom_system_prompt=custom_system_prompt,
-            max_tokens=max_tokens,
-            temperature=temperature
-        )
+        # 创建流式响应
+        from django.http import StreamingHttpResponse
         
-        if result['success']:
-            return JsonResponse({
-                'success': True,
-                'data': result,
-                'note': '这是普通响应模式，流式响应功能正在开发中'
-            })
-        else:
-            return JsonResponse({
-                'success': False,
-                'error': result.get('error', '对话失败'),
-                'model_used': result.get('model_used')
-            }, status=500)
+        def generate_stream():
+            try:
+                # 发送开始信号
+                yield f"data: {json.dumps({'type': 'start', 'message': '开始流式对话'}, ensure_ascii=False)}\n\n"
+                
+                # 调用流式对话服务
+                for chunk in ai_chat_service.stream_chat(
+                    user_message=user_message,
+                    conversation_history=conversation_history,
+                    system_prompt_type=system_prompt_type,
+                    custom_system_prompt=custom_system_prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature
+                ):
+                    yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                
+                # 发送结束信号
+                yield f"data: {json.dumps({'type': 'end'}, ensure_ascii=False)}\n\n"
+                
+            except Exception as e:
+                logger.error(f"流式对话生成失败: {str(e)}")
+                yield f"data: {json.dumps({'type': 'error', 'error': str(e)}, ensure_ascii=False)}\n\n"
+        
+        response = StreamingHttpResponse(
+            generate_stream(),
+            content_type='text/event-stream'
+        )
+        response['Cache-Control'] = 'no-cache'
+        response['Connection'] = 'keep-alive'
+        response['Access-Control-Allow-Origin'] = '*'
+        response['Access-Control-Allow-Headers'] = 'Cache-Control'
+        
+        return response
             
     except json.JSONDecodeError:
         return JsonResponse({
@@ -442,4 +459,86 @@ def stream_chat(request):
         return JsonResponse({
             'success': False,
             'error': f'流式对话失败: {str(e)}'
+        }, status=500)
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def stream_chat_with_images(request):
+    """
+    流式带图片的AI对话API
+    支持实时流式响应，使用Server-Sent Events
+    """
+    try:
+        # 解析请求数据
+        data = json.loads(request.body)
+        user_message = data.get('message', '').strip()
+        image_ids = data.get('image_ids', [])
+        
+        if not image_ids:
+            return JsonResponse({
+                'success': False,
+                'error': 'image_ids字段不能为空'
+            }, status=400)
+        
+        if not isinstance(image_ids, list):
+            return JsonResponse({
+                'success': False,
+                'error': 'image_ids必须是列表格式'
+            }, status=400)
+        
+        # 获取可选参数
+        conversation_history = data.get('conversation_history', [])
+        image_prompt_type = data.get('image_prompt_type', 'default')
+        custom_image_prompt = data.get('custom_image_prompt', None)
+        max_tokens = data.get('max_tokens', None)
+        temperature = data.get('temperature', None)
+        
+        # 创建流式响应
+        from django.http import StreamingHttpResponse
+        
+        def generate_stream():
+            try:
+                # 发送开始信号
+                yield f"data: {json.dumps({'type': 'start', 'message': '开始流式图片对话'}, ensure_ascii=False)}\n\n"
+                
+                # 调用流式图片对话服务
+                for chunk in ai_chat_service.stream_chat_with_images(
+                    user_message=user_message,
+                    image_ids=image_ids,
+                    conversation_history=conversation_history,
+                    image_prompt_type=image_prompt_type,
+                    custom_image_prompt=custom_image_prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature
+                ):
+                    yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                
+                # 发送结束信号
+                yield f"data: {json.dumps({'type': 'end'}, ensure_ascii=False)}\n\n"
+                
+            except Exception as e:
+                logger.error(f"流式图片对话生成失败: {str(e)}")
+                yield f"data: {json.dumps({'type': 'error', 'error': str(e)}, ensure_ascii=False)}\n\n"
+        
+        response = StreamingHttpResponse(
+            generate_stream(),
+            content_type='text/event-stream'
+        )
+        response['Cache-Control'] = 'no-cache'
+        response['Connection'] = 'keep-alive'
+        response['Access-Control-Allow-Origin'] = '*'
+        response['Access-Control-Allow-Headers'] = 'Cache-Control'
+        
+        return response
+            
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'error': '请求数据格式错误，请提供有效的JSON数据'
+        }, status=400)
+    except Exception as e:
+        logger.error(f"流式图片对话失败: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': f'流式图片对话失败: {str(e)}'
         }, status=500)

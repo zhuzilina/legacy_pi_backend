@@ -5,7 +5,7 @@ import os
 AI_MODEL_CONFIG = {
     'base_url': 'https://ark.cn-beijing.volces.com/api/v3',
     'model': 'doubao-seed-1-6-250615',
-    'vision_model': 'doubao-pro-32k',  # 图片理解模型
+    'vision_model': 'doubao-seed-1-6-250615',  # 图片理解模型
     'api_key': os.environ.get("ARK_API_KEY", "你的API key")
 }
 

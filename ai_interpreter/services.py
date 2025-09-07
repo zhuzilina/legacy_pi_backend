@@ -104,6 +104,74 @@ class AIInterpreterService:
         
         return results
     
+    def stream_interpret_text(self, 
+                             text: str, 
+                             prompt_type: str = 'default',
+                             custom_prompt: Optional[str] = None,
+                             max_tokens: int = 1000) -> Dict[str, Any]:
+        """
+        流式解读文本内容
+        
+        Args:
+            text: 要解读的文本内容
+            prompt_type: 提示词类型 (default, summary, analysis, qa)
+            custom_prompt: 自定义提示词
+            max_tokens: 最大输出token数
+            
+        Yields:
+            流式响应数据块
+        """
+        try:
+            # 选择提示词
+            if custom_prompt:
+                prompt = custom_prompt
+            else:
+                prompt = INTERPRETATION_PROMPTS.get(prompt_type, INTERPRETATION_PROMPTS['default'])
+            
+            # 构建完整的提示词
+            full_prompt = f"{prompt}\n\n{text}"
+            
+            # 调用流式大模型API
+            completion = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "user", "content": full_prompt}
+                ],
+                max_tokens=max_tokens,
+                temperature=0.7,
+                stream=True
+            )
+            
+            # 流式返回响应
+            for chunk in completion:
+                if not chunk.choices:
+                    continue
+                
+                delta = chunk.choices[0].delta
+                if hasattr(delta, 'content') and delta.content:
+                    yield {
+                        'type': 'content',
+                        'content': delta.content,
+                        'model': self.model,
+                        'prompt_type': prompt_type,
+                        'original_text_length': len(text)
+                    }
+                elif hasattr(chunk.choices[0], 'finish_reason') and chunk.choices[0].finish_reason:
+                    yield {
+                        'type': 'done',
+                        'finish_reason': chunk.choices[0].finish_reason,
+                        'model': self.model,
+                        'tokens_used': chunk.usage.total_tokens if chunk.usage else None
+                    }
+            
+        except Exception as e:
+            logger.error(f"流式AI解读失败: {str(e)}")
+            yield {
+                'type': 'error',
+                'error': str(e),
+                'model': self.model
+            }
+
     def health_check(self) -> Dict[str, Any]:
         """
         健康检查，测试API连接

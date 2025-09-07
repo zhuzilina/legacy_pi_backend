@@ -185,11 +185,90 @@ class InterpretView(View):
             'endpoints': {
                 'interpret': '/api/ai/interpret/',
                 'batch_interpret': '/api/ai/batch/',
+                'stream_interpret': '/api/ai/stream/',
                 'health_check': '/api/ai/health/',
                 'prompts': '/api/ai/prompts/'
-            }
+            },
+            'features': [
+                '文本解读和分析',
+                '多种解读模式',
+                '批量文本处理',
+                '自定义提示词',
+                '⚡ 流式解读支持（Server-Sent Events）',
+                '🔄 实时流式响应'
+            ]
         })
     
     def post(self, request):
         """POST方法：调用文本解读"""
         return interpret_text(request)
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def stream_interpret_text(request):
+    """
+    流式解读文本API
+    支持实时流式响应，使用Server-Sent Events
+    """
+    try:
+        # 解析请求数据
+        data = json.loads(request.body)
+        text = data.get('text', '').strip()
+        
+        if not text:
+            return JsonResponse({
+                'success': False,
+                'error': 'text字段不能为空'
+            }, status=400)
+        
+        # 获取可选参数
+        prompt_type = data.get('prompt_type', 'default')
+        custom_prompt = data.get('custom_prompt', None)
+        max_tokens = data.get('max_tokens', 1000)
+        
+        # 创建流式响应
+        from django.http import StreamingHttpResponse
+        
+        def generate_stream():
+            try:
+                # 发送开始信号
+                yield f"data: {json.dumps({'type': 'start', 'message': '开始流式解读'}, ensure_ascii=False)}\n\n"
+                
+                # 调用流式解读服务
+                for chunk in ai_interpreter_service.stream_interpret_text(
+                    text=text,
+                    prompt_type=prompt_type,
+                    custom_prompt=custom_prompt,
+                    max_tokens=max_tokens
+                ):
+                    yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                
+                # 发送结束信号
+                yield f"data: {json.dumps({'type': 'end'}, ensure_ascii=False)}\n\n"
+                
+            except Exception as e:
+                logger.error(f"流式解读生成失败: {str(e)}")
+                yield f"data: {json.dumps({'type': 'error', 'error': str(e)}, ensure_ascii=False)}\n\n"
+        
+        response = StreamingHttpResponse(
+            generate_stream(),
+            content_type='text/event-stream'
+        )
+        response['Cache-Control'] = 'no-cache'
+        response['Connection'] = 'keep-alive'
+        response['Access-Control-Allow-Origin'] = '*'
+        response['Access-Control-Allow-Headers'] = 'Cache-Control'
+        
+        return response
+            
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'error': '请求数据格式错误，请提供有效的JSON数据'
+        }, status=400)
+    except Exception as e:
+        logger.error(f"流式解读失败: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': f'流式解读失败: {str(e)}'
+        }, status=500)

@@ -8,11 +8,15 @@ AI对话API是一个支持多轮对话的智能聊天服务，基于大语言模
 
 - 🗣️ **多轮对话支持**：支持连续的多轮对话交互
 - 📝 **客户端维护历史**：对话记录完全由客户端管理，服务端无状态
-- 🎭 **多种AI角色**：提供多种预设的系统提示词风格
+- 🎭 **专业AI助手**：专业的AI知识助手，具备广泛的知识储备和专业的分析能力
 - ⚙️ **灵活参数配置**：支持自定义提示词、温度、最大token数等参数
 - 🔒 **安全可靠**：完善的错误处理和输入验证
 - 📊 **详细响应信息**：返回模型信息、token使用量等详细信息
-- 🌟 **红色文化主题**：专门用于红色文化和理论知识问答，具有严格的回答范围限制
+- 🖼️ **图片理解功能**：支持图片上传、缓存和AI图片分析
+- 📤 **图片缓存管理**：图片自动缓存到Redis，支持批量上传
+- 🎨 **多种图片分析风格**：提供详细、简洁、创意、技术等多种图片理解模式
+- ⚡ **流式对话支持**：支持实时流式响应，使用Server-Sent Events技术
+- 🔄 **实时流式响应**：AI回复内容实时流式返回，提升用户体验
 
 ## API端点
 
@@ -26,8 +30,14 @@ http://your-domain/api/ai-chat/
 | 端点 | 方法 | 描述 |
 |------|------|------|
 | `/chat/` | POST | 主要对话API，支持多轮对话 |
-| `/stream/` | POST | 流式对话API（实验性功能） |
+| `/chat-with-images/` | POST | 带图片的AI对话API |
+| `/upload-image/` | POST | 上传单张图片到Redis缓存 |
+| `/upload-images-batch/` | POST | 批量上传图片到Redis缓存 |
+| `/stream/` | POST | 流式对话API（Server-Sent Events） |
+| `/stream-with-images/` | POST | 流式带图片的AI对话API |
 | `/prompts/` | GET | 获取可用的系统提示词类型 |
+| `/image-prompts/` | GET | 获取可用的图片理解提示词类型 |
+| `/image-cache-stats/` | GET | 获取图片缓存统计信息 |
 | `/health/` | GET | 健康检查，测试服务状态 |
 | `/config/` | GET | 获取对话配置参数 |
 | `/` | GET/POST | 基于类的视图，支持GET和POST |
@@ -110,102 +120,363 @@ Content-Type: application/json
 | `data.conversation_length` | integer | 当前对话的消息数量 |
 | `data.suggested_next_history` | array | 建议的下一轮对话历史 |
 
-### 2. 系统提示词类型
+### 2. 图片上传API (`/upload-image/`)
+
+#### 请求格式
+```http
+POST /api/ai-chat/upload-image/
+Content-Type: multipart/form-data
+
+image: [图片文件]
+```
+
+#### 请求参数
+
+| 参数 | 类型 | 必填 | 描述 |
+|------|------|------|------|
+| `image` | file | ✅ | 要上传的图片文件 |
+
+#### 支持的图片格式
+- JPEG
+- PNG
+- GIF
+- WEBP
+
+#### 图片限制
+- 最大文件大小：5MB
+- 缓存过期时间：7天
+
+#### 响应格式
+
+```json
+{
+    "success": true,
+    "data": {
+        "image_id": "abc123def456",
+        "image_info": {
+            "filename": "example.jpg",
+            "size": 1024000,
+            "width": 1920,
+            "height": 1080,
+            "format": "JPEG",
+            "content_type": "image/jpeg"
+        }
+    }
+}
+```
+
+#### 响应字段说明
+
+| 字段 | 类型 | 描述 |
+|------|------|------|
+| `success` | boolean | 上传是否成功 |
+| `data.image_id` | string | 图片的唯一标识符，用于后续对话 |
+| `data.image_info.filename` | string | 原始文件名 |
+| `data.image_info.size` | integer | 文件大小（字节） |
+| `data.image_info.width` | integer | 图片宽度 |
+| `data.image_info.height` | integer | 图片高度 |
+| `data.image_info.format` | string | 图片格式 |
+| `data.image_info.content_type` | string | MIME类型 |
+
+### 3. 批量图片上传API (`/upload-images-batch/`)
+
+#### 请求格式
+```http
+POST /api/ai-chat/upload-images-batch/
+Content-Type: multipart/form-data
+
+images: [图片文件1]
+images: [图片文件2]
+...
+```
+
+#### 请求参数
+
+| 参数 | 类型 | 必填 | 描述 |
+|------|------|------|------|
+| `images` | file[] | ✅ | 要上传的图片文件列表 |
+
+#### 限制
+- 一次最多上传5张图片
+- 每张图片最大5MB
+
+#### 响应格式
+
+```json
+{
+    "success": true,
+    "data": {
+        "total_count": 3,
+        "success_count": 2,
+        "results": [
+            {
+                "index": 0,
+                "success": true,
+                "image_id": "abc123def456",
+                "image_info": {
+                    "filename": "image1.jpg",
+                    "size": 1024000,
+                    "width": 1920,
+                    "height": 1080,
+                    "format": "JPEG",
+                    "content_type": "image/jpeg"
+                }
+            },
+            {
+                "index": 1,
+                "success": false,
+                "error": "图片文件过大，最大支持 5MB"
+            },
+            {
+                "index": 2,
+                "success": true,
+                "image_id": "def456ghi789",
+                "image_info": {
+                    "filename": "image2.png",
+                    "size": 2048000,
+                    "width": 1280,
+                    "height": 720,
+                    "format": "PNG",
+                    "content_type": "image/png"
+                }
+            }
+        ]
+    }
+}
+```
+
+### 4. 带图片的AI对话API (`/chat-with-images/`)
+
+#### 请求格式
+```http
+POST /api/ai-chat/chat-with-images/
+Content-Type: application/json
+
+{
+    "message": "请分析这些图片",
+    "image_ids": ["abc123def456", "def456ghi789"],
+    "conversation_history": [
+        {"role": "user", "content": "之前的用户消息"},
+        {"role": "assistant", "content": "之前的AI回复"}
+    ],
+    "image_prompt_type": "default",
+    "custom_image_prompt": "自定义图片理解提示词（可选）",
+    "max_tokens": 2000,
+    "temperature": 0.7
+}
+```
+
+#### 请求参数
+
+| 参数 | 类型 | 必填 | 默认值 | 描述 |
+|------|------|------|--------|------|
+| `message` | string | ❌ | "" | 用户输入的消息内容 |
+| `image_ids` | array | ✅ | - | 图片ID列表 |
+| `conversation_history` | array | ❌ | [] | 对话历史记录 |
+| `image_prompt_type` | string | ❌ | "default" | 图片理解提示词类型 |
+| `custom_image_prompt` | string | ❌ | null | 自定义图片理解提示词 |
+| `max_tokens` | integer | ❌ | 2000 | 最大输出token数 |
+| `temperature` | float | ❌ | 0.7 | 温度参数（0.0-1.0） |
+
+#### 响应格式
+
+```json
+{
+    "success": true,
+    "data": {
+        "response": "AI对图片的分析结果",
+        "model_used": "doubao-seed-1-6-250615",
+        "image_prompt_type": "default",
+        "images_processed": 2,
+        "tokens_used": 1234,
+        "conversation_length": 3,
+        "suggested_next_history": [
+            {"role": "user", "content": "请分析这些图片"},
+            {"role": "assistant", "content": "AI对图片的分析结果"}
+        ]
+    }
+}
+```
+
+#### 响应字段说明
+
+| 字段 | 类型 | 描述 |
+|------|------|------|
+| `success` | boolean | 请求是否成功 |
+| `data.response` | string | AI的回复内容 |
+| `data.model_used` | string | 使用的AI模型名称 |
+| `data.image_prompt_type` | string | 使用的图片理解提示词类型 |
+| `data.images_processed` | integer | 成功处理的图片数量 |
+| `data.tokens_used` | integer | 本次对话使用的token总数 |
+| `data.conversation_length` | integer | 当前对话的消息数量 |
+| `data.suggested_next_history` | array | 建议的下一轮对话历史 |
+
+### 5. 系统提示词类型
 
 #### 预设提示词类型
 
 | 类型 | 描述 | 适用场景 |
 |------|------|----------|
-| `default` | 智能、友好、有帮助的AI助手 | 通用对话 |
-| `professional` | 专业、严谨的AI助手 | 工作、学习 |
-| `creative` | 富有创造力和想象力的AI助手 | 创意、艺术 |
-| `educational` | 耐心、细致的AI教育助手 | 教学、学习 |
-| `casual` | 轻松、友好的AI助手 | 休闲聊天 |
-| `technical` | 技术专家AI助手 | 技术问题 |
-| 🌟 `red_culture` | **红色文化和理论知识专用AI助手** | **理论学习、政策宣传、教育培训、思想教育** |
+| `default` | **专业的AI知识助手**，具备广泛的知识储备和专业的分析能力 | 通用知识问答、专业咨询 |
 
-#### 🌟 红色文化主题 (`red_culture`) 详细说明
+#### 默认提示词特点
 
-红色文化主题是一个特殊的系统提示词类型，专门用于红色文化和理论知识问答，同时也关注教育、科技、新闻、生活等积极正面的话题。该主题具有以下特点：
+当前的 `default` 系统提示词具有以下特点：
 
-##### 优先回答范围
-AI优先回答与以下主题相关的问题：
-- **马克思主义理论**：马克思主义哲学、政治经济学、科学社会主义
-- **中国特色社会主义理论体系**：邓小平理论、"三个代表"重要思想、科学发展观、习近平新时代中国特色社会主义思想
-- **中国共产党历史、理论、路线方针政策**：党的历史、理论创新、政策解读
-- **中国革命历史、建设历史、改革历史**：重要历史事件、历史人物、历史经验
-- **社会主义核心价值观、中华优秀传统文化**：价值观念、文化传承、道德建设
-- **国家法律法规、政策文件**：法律条文、政策解读、制度说明
-- **时事政治、国际关系中的相关理论问题**：政治理论、国际关系理论
+##### 核心能力
+- **专业知识解答**：提供准确、专业、有深度的知识解答
+- **科学分析**：基于科学事实、权威理论和实践经验进行分析
+- **逻辑清晰**：以逻辑清晰、结构化的方式组织回答
+- **智能调整**：根据问题复杂度调整回答的详细程度
 
-##### 积极正面话题
-AI也可以回答以下积极正面的内容：
-- **教育话题**：学习方法、知识科普、技能培训、学术研究等
-- **科技话题**：科技创新、技术发展、科学发现、工程应用等
-- **新闻话题**：时事新闻、社会进步、经济发展、国际关系等
-- **生活话题**：健康生活、环保理念、社会公益、文化传承等
-- **职业发展**：职场技能、创业指导、职业规划、个人成长等
+##### 回答原则
+1. **准确性优先**：确保信息的准确性和可靠性，避免传播错误信息
+2. **专业深度**：提供有见地的分析，不仅仅是表面信息
+3. **逻辑清晰**：条理分明地组织答案，便于理解
+4. **实用导向**：注重回答的实用价值和可操作性
+5. **持续学习**：承认知识边界，对不确定的内容保持谦逊
 
-##### 严格禁止回答
-对于以下内容，AI必须明确拒绝回答：
-- 娱乐八卦、明星绯闻、娱乐圈内幕
-- 商业广告、产品推销、营销推广
-- 个人隐私、八卦消息、负面新闻
-- 暴力、色情、赌博等不良内容
-- 政治敏感、社会争议等敏感话题
+##### 知识领域
+涵盖但不限于：科学技术、人文社科、商业管理、教育学习、生活健康、文化艺术、历史哲学、法律法规等各个领域的专业知识。
 
-##### 回答要求
-- 基于权威理论、政策文件、科学事实和正面价值观
-- 语言准确、严谨、有教育意义和启发性
-- 引导用户树立正确的价值观和世界观
-- 对于超出范围的问题，礼貌地说明专业领域
-- 在回答其他话题时，也要体现积极正面的价值导向
-
-##### 使用场景
-- **理论学习**：马克思主义理论学习、政策理论学习
-- **政策宣传**：党的路线方针政策宣传、国家政策解读
-- **教育培训**：党校培训、干部教育、学生思想政治教育
-- **思想教育**：价值观教育、理想信念教育、爱国主义教育
-- **知识科普**：科学知识普及、技术发展介绍
-- **生活指导**：健康生活指导、职业发展建议
-
-##### 使用示例
-
-```python
-import requests
-
-# 正常范围内的红色文化问题
-response1 = requests.post("http://localhost:8000/api/ai-chat/chat/", json={
-    "message": "请介绍一下马克思主义的基本原理",
-    "system_prompt_type": "red_culture"
-})
-
-# 教育话题（积极正面）
-response2 = requests.post("http://localhost:8000/api/ai-chat/chat/", json={
-    "message": "如何提高学习效率？",
-    "system_prompt_type": "red_culture"
-})
-
-# 科技话题（积极正面）
-response3 = requests.post("http://localhost:8000/api/ai-chat/chat/", json={
-    "message": "人工智能的发展前景如何？",
-    "system_prompt_type": "red_culture"
-})
-
-# 超出范围的娱乐问题（AI会拒绝回答）
-response4 = requests.post("http://localhost:8000/api/ai-chat/chat/", json={
-    "message": "最近有什么明星八卦新闻吗？",
-    "system_prompt_type": "red_culture"
-})
-```
+##### 回答风格
+- 语言专业但不失亲和力
+- 结构清晰，重点突出
+- 适当使用例子和类比帮助理解
+- 根据用户需求调整详细程度
 
 #### 自定义提示词
 
 除了使用预设类型，还可以通过 `custom_system_prompt` 参数自定义AI助手的角色和行为。
 
-### 3. 配置参数
+### 6. 图片理解提示词类型
 
-#### 默认配置
+#### 预设图片理解提示词
+
+| 类型 | 描述 | 适用场景 |
+|------|------|----------|
+| `default` | 详细描述图片内容，包括主要对象、场景、颜色、构图等元素 | 通用图片分析 |
+| `detailed` | 详细分析图片，包括主要内容、场景环境、颜色光线、构图布局、含义用途 | 深度图片分析 |
+| `simple` | 用简洁的语言描述图片的主要内容 | 快速图片理解 |
+| `creative` | 发挥想象力，为图片创作有趣的故事或描述 | 创意图片解读 |
+| `technical` | 从技术角度分析图片，包括构图、色彩、光线、焦点等摄影技术要素 | 技术图片分析 |
+| `educational` | 以教育者角度分析图片，指出知识点、学习价值或教育意义 | 教育图片分析 |
+| `qa` | 基于图片回答用户的问题 | 图片问答 |
+
+#### 自定义图片理解提示词
+
+除了使用预设类型，还可以通过 `custom_image_prompt` 参数自定义AI如何理解和分析图片。
+
+### 7. 图片缓存统计API (`/image-cache-stats/`)
+
+#### 请求格式
+```http
+GET /api/ai-chat/image-cache-stats/
+```
+
+#### 响应格式
+
+```json
+{
+    "success": true,
+    "data": {
+        "total_images": 25,
+        "total_size_bytes": 52428800,
+        "total_size_mb": 50.0,
+        "cache_expire_time": 604800,
+        "max_image_size": 5242880,
+        "supported_formats": ["JPEG", "PNG", "GIF", "WEBP"]
+    }
+}
+```
+
+#### 响应字段说明
+
+| 字段 | 类型 | 描述 |
+|------|------|------|
+| `success` | boolean | 请求是否成功 |
+| `data.total_images` | integer | 当前缓存的图片总数 |
+| `data.total_size_bytes` | integer | 缓存图片的总大小（字节） |
+| `data.total_size_mb` | float | 缓存图片的总大小（MB） |
+| `data.cache_expire_time` | integer | 缓存过期时间（秒） |
+| `data.max_image_size` | integer | 单张图片最大大小（字节） |
+| `data.supported_formats` | array | 支持的图片格式列表 |
+
+### 8. 流式对话API (`/stream/`)
+
+#### 请求格式
+```http
+POST /api/ai-chat/stream/
+Content-Type: application/json
+
+{
+    "message": "用户输入的消息",
+    "conversation_history": [
+        {"role": "user", "content": "之前的用户消息"},
+        {"role": "assistant", "content": "之前的AI回复"}
+    ],
+    "system_prompt_type": "default",
+    "custom_system_prompt": "自定义系统提示词（可选）",
+    "max_tokens": 2000,
+    "temperature": 0.7
+}
+```
+
+#### 请求参数
+与普通对话API相同，请参考 [对话API参数说明](#1-对话api-chat)
+
+#### 响应格式
+流式响应使用Server-Sent Events (SSE)格式，每个数据块包含：
+
+```json
+data: {"type": "start", "message": "开始流式对话"}
+
+data: {"type": "content", "content": "AI回复的", "model": "doubao-seed-1-6-250615", "system_prompt_type": "default"}
+
+data: {"type": "content", "content": "内容片段", "model": "doubao-seed-1-6-250615", "system_prompt_type": "default"}
+
+data: {"type": "done", "finish_reason": "stop", "model": "doubao-seed-1-6-250615", "tokens_used": 1234}
+
+data: {"type": "end"}
+```
+
+#### 响应类型说明
+
+| 类型 | 描述 | 字段 |
+|------|------|------|
+| `start` | 开始信号 | `message`: 开始消息 |
+| `content` | 内容片段 | `content`: 文本内容，`model`: 模型名称，`system_prompt_type`: 提示词类型 |
+| `done` | 完成信号 | `finish_reason`: 完成原因，`tokens_used`: 使用的token数 |
+| `error` | 错误信号 | `error`: 错误信息 |
+| `end` | 结束信号 | 无额外字段 |
+
+### 9. 流式带图片对话API (`/stream-with-images/`)
+
+#### 请求格式
+```http
+POST /api/ai-chat/stream-with-images/
+Content-Type: application/json
+
+{
+    "message": "请分析这些图片",
+    "image_ids": ["abc123def456", "def456ghi789"],
+    "conversation_history": [],
+    "image_prompt_type": "detailed",
+    "custom_image_prompt": "自定义图片理解提示词（可选）",
+    "max_tokens": 2000,
+    "temperature": 0.7
+}
+```
+
+#### 请求参数
+与带图片对话API相同，请参考 [带图片的AI对话API参数说明](#4-带图片的ai对话api-chat-with-images)
+
+#### 响应格式
+流式响应格式与普通流式对话相同，但内容类型为图片分析结果。
+
+### 10. 配置参数
+
+#### 对话配置
 
 ```json
 {
@@ -216,18 +487,30 @@ response4 = requests.post("http://localhost:8000/api/ai-chat/chat/", json={
 }
 ```
 
+#### 图片处理配置
+
+```json
+{
+    "max_image_size": 5242880,
+    "supported_formats": ["JPEG", "PNG", "GIF", "WEBP"],
+    "cache_expire_time": 604800,
+    "max_images_per_request": 5
+}
+```
+
 #### 参数说明
 
+**对话参数**：
 - `max_tokens`: 控制AI回复的最大长度
 - `temperature`: 控制回复的创造性（0.0=保守，1.0=创造性）
 - `max_history_length`: 建议的最大对话历史长度
+- `default_system_prompt`: 默认系统提示词类型
 
-#### 🌟 红色文化主题特殊配置
-
-当使用 `red_culture` 主题时，系统会自动调整以下参数：
-- **温度参数**：自动降低到0.5以下，确保回答更加严谨
-- **最大token数**：自动增加到2500，确保回答的完整性
-- **内容验证**：自动验证用户问题是否在允许范围内
+**图片处理参数**：
+- `max_image_size`: 单张图片最大大小（5MB）
+- `supported_formats`: 支持的图片格式列表
+- `cache_expire_time`: 图片缓存过期时间（7天）
+- `max_images_per_request`: 每次请求最大图片数量（5张）
 
 ## 使用示例
 
@@ -237,7 +520,7 @@ response4 = requests.post("http://localhost:8000/api/ai-chat/chat/", json={
 import requests
 
 # 单轮对话
-response = requests.post("http://localhost:8000/api/ai-chat/chat/", json={
+response = requests.post("http://10.0.2.2:8000/api/ai-chat/chat/", json={
     "message": "你好，请介绍一下你自己",
     "system_prompt_type": "default"
 })
@@ -251,7 +534,7 @@ print(response.json())
 import requests
 
 # 第一轮对话
-response1 = requests.post("http://localhost:8000/api/ai-chat/chat/", json={
+response1 = requests.post("http://10.0.2.2:8000/api/ai-chat/chat/", json={
     "message": "我想学习Python编程",
     "system_prompt_type": "educational"
 })
@@ -260,7 +543,7 @@ result1 = response1.json()
 ai_response1 = result1['data']['response']
 
 # 第二轮对话（带历史记录）
-response2 = requests.post("http://localhost:8000/api/ai-chat/chat/", json={
+response2 = requests.post("http://10.0.2.2:8000/api/ai-chat/chat/", json={
     "message": "请给我一个具体的例子",
     "conversation_history": [
         {"role": "user", "content": "我想学习Python编程"},
@@ -272,28 +555,59 @@ response2 = requests.post("http://localhost:8000/api/ai-chat/chat/", json={
 print(response2.json())
 ```
 
-### 🌟 红色文化主题对话
+### 图片上传和对话
 
 ```python
 import requests
 
-# 红色文化理论学习
-response1 = requests.post("http://localhost:8000/api/ai-chat/chat/", json={
-    "message": "请解释一下什么是中国特色社会主义",
-    "system_prompt_type": "red_culture"
-})
+# 1. 上传图片
+with open('example.jpg', 'rb') as f:
+    files = {'image': f}
+    upload_response = requests.post("http://10.0.2.2:8000/api/ai-chat/upload-image/", files=files)
+    
+upload_result = upload_response.json()
+if upload_result['success']:
+    image_id = upload_result['data']['image_id']
+    print(f"图片上传成功，ID: {image_id}")
+    
+    # 2. 使用图片进行对话
+    chat_response = requests.post("http://10.0.2.2:8000/api/ai-chat/chat-with-images/", json={
+        "message": "请详细分析这张图片",
+        "image_ids": [image_id],
+        "image_prompt_type": "detailed"
+    })
+    
+    print(chat_response.json())
+```
 
-# 政策解读
-response2 = requests.post("http://localhost:8000/api/ai-chat/chat/", json={
-    "message": "请介绍一下'十四五'规划的主要内容",
-    "system_prompt_type": "red_culture"
-})
+### 批量图片上传和对话
 
-# 超出范围的问题（AI会拒绝回答）
-response3 = requests.post("http://localhost:8000/api/ai-chat/chat/", json={
-    "message": "推荐一下最近有什么好看的电影",
-    "system_prompt_type": "red_culture"
-})
+```python
+import requests
+
+# 1. 批量上传图片
+files = []
+for i in range(3):
+    files.append(('images', open(f'image{i+1}.jpg', 'rb')))
+
+batch_response = requests.post("http://10.0.2.2:8000/api/ai-chat/upload-images-batch/", files=files)
+batch_result = batch_response.json()
+
+if batch_result['success']:
+    # 提取成功上传的图片ID
+    image_ids = []
+    for result in batch_result['data']['results']:
+        if result['success']:
+            image_ids.append(result['image_id'])
+    
+    # 2. 使用多张图片进行对话
+    chat_response = requests.post("http://10.0.2.2:8000/api/ai-chat/chat-with-images/", json={
+        "message": "请比较这些图片的异同点",
+        "image_ids": image_ids,
+        "image_prompt_type": "comparison"
+    })
+    
+    print(chat_response.json())
 ```
 
 ### 自定义提示词
@@ -301,13 +615,91 @@ response3 = requests.post("http://localhost:8000/api/ai-chat/chat/", json={
 ```python
 import requests
 
-response = requests.post("http://localhost:8000/api/ai-chat/chat/", json={
+response = requests.post("http://10.0.2.2:8000/api/ai-chat/chat/", json={
     "message": "请用幽默的方式解释什么是人工智能",
     "custom_system_prompt": "你是一个幽默风趣的AI助手，请用轻松有趣的方式回答问题，可以适当使用比喻和笑话。",
     "temperature": 0.9
 })
 
 print(response.json())
+```
+
+### 流式对话示例
+
+```python
+import requests
+import json
+
+# 流式对话
+def stream_chat(message, history=None):
+    url = "http://10.0.2.2:8000/api/ai-chat/stream/"
+    data = {
+        "message": message,
+        "conversation_history": history or [],
+        "system_prompt_type": "default"
+    }
+    
+    response = requests.post(url, json=data, stream=True)
+    
+    for line in response.iter_lines():
+        if line:
+            line = line.decode('utf-8')
+            if line.startswith('data: '):
+                try:
+                    data = json.loads(line[6:])  # 去掉 'data: ' 前缀
+                    if data['type'] == 'content':
+                        print(data['content'], end='', flush=True)
+                    elif data['type'] == 'done':
+                        print(f"\n\n[完成] Token使用量: {data.get('tokens_used', 'N/A')}")
+                    elif data['type'] == 'error':
+                        print(f"\n[错误] {data['error']}")
+                except json.JSONDecodeError:
+                    continue
+
+# 使用示例
+stream_chat("请详细介绍一下人工智能的发展历史")
+```
+
+### 流式图片对话示例
+
+```python
+import requests
+import json
+
+# 1. 先上传图片
+with open('example.jpg', 'rb') as f:
+    files = {'image': f}
+    upload_response = requests.post("http://10.0.2.2:8000/api/ai-chat/upload-image/", files=files)
+    
+upload_result = upload_response.json()
+if upload_result['success']:
+    image_id = upload_result['data']['image_id']
+    
+    # 2. 流式图片对话
+    def stream_chat_with_images(message, image_ids):
+        url = "http://10.0.2.2:8000/api/ai-chat/stream-with-images/"
+        data = {
+            "message": message,
+            "image_ids": image_ids,
+            "image_prompt_type": "detailed"
+        }
+        
+        response = requests.post(url, json=data, stream=True)
+        
+        for line in response.iter_lines():
+            if line:
+                line = line.decode('utf-8')
+                if line.startswith('data: '):
+                    try:
+                        data = json.loads(line[6:])
+                        if data['type'] == 'content':
+                            print(data['content'], end='', flush=True)
+                        elif data['type'] == 'done':
+                            print(f"\n\n[完成] 处理图片数: {data.get('images_processed', 'N/A')}")
+                    except json.JSONDecodeError:
+                        continue
+    
+    stream_chat_with_images("请详细分析这张图片", [image_id])
 ```
 
 ### JavaScript示例
@@ -330,15 +722,111 @@ async function chat(message, history = [], promptType = 'default') {
     return await response.json();
 }
 
+// 图片上传
+async function uploadImage(imageFile) {
+    const formData = new FormData();
+    formData.append('image', imageFile);
+    
+    const response = await fetch('/api/ai-chat/upload-image/', {
+        method: 'POST',
+        body: formData
+    });
+    
+    return await response.json();
+}
+
+// 带图片的对话
+async function chatWithImages(message, imageIds, history = [], imagePromptType = 'default') {
+    const response = await fetch('/api/ai-chat/chat-with-images/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            message: message,
+            image_ids: imageIds,
+            conversation_history: history,
+            image_prompt_type: imagePromptType
+        })
+    });
+    
+    return await response.json();
+}
+
 // 使用示例
 // 普通对话
 chat("你好，请介绍一下你自己").then(result => {
     console.log(result.data.response);
 });
 
-// 红色文化主题对话
-chat("请介绍一下马克思主义的基本原理", [], "red_culture").then(result => {
-    console.log(result.data.response);
+// 流式对话
+async function streamChat(message, history = [], promptType = 'default') {
+    const response = await fetch('/api/ai-chat/stream/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            message: message,
+            conversation_history: history,
+            system_prompt_type: promptType
+        })
+    });
+    
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n');
+        
+        for (const line of lines) {
+            if (line.startsWith('data: ')) {
+                try {
+                    const data = JSON.parse(line.slice(6));
+                    if (data.type === 'content') {
+                        console.log(data.content);
+                    } else if (data.type === 'done') {
+                        console.log(`[完成] Token使用量: ${data.tokens_used}`);
+                    } else if (data.type === 'error') {
+                        console.error(`[错误] ${data.error}`);
+                    }
+                } catch (e) {
+                    // 忽略解析错误
+                }
+            }
+        }
+    }
+}
+
+// 图片上传和对话
+const fileInput = document.getElementById('imageInput');
+fileInput.addEventListener('change', async (event) => {
+    const file = event.target.files[0];
+    if (file) {
+        // 上传图片
+        const uploadResult = await uploadImage(file);
+        if (uploadResult.success) {
+            const imageId = uploadResult.data.image_id;
+            
+            // 使用图片进行对话
+            const chatResult = await chatWithImages(
+                "请分析这张图片", 
+                [imageId], 
+                [], 
+                "detailed"
+            );
+            console.log(chatResult.data.response);
+        }
+    }
+});
+
+// 流式对话使用示例
+streamChat("请详细介绍一下人工智能的发展历史").then(() => {
+    console.log("流式对话完成");
 });
 ```
 
@@ -399,33 +887,50 @@ chat("请介绍一下马克思主义的基本原理", [], "red_culture").then(re
 ### 健康检查
 
 ```bash
-curl http://localhost:8000/api/ai-chat/health/
+curl http://10.0.2.2:8000/api/ai-chat/health/
 ```
 
 ### 获取配置信息
 
 ```bash
-curl http://localhost:8000/api/ai-chat/config/
+curl http://10.0.2.2:8000/api/ai-chat/config/
 ```
 
 ### 获取可用提示词
 
 ```bash
-curl http://localhost:8000/api/ai-chat/prompts/
+curl http://10.0.2.2:8000/api/ai-chat/prompts/
 ```
 
-### 🌟 测试红色文化主题
+### 测试图片功能
 
 ```bash
-# 测试正常范围内的红色文化问题
-curl -X POST http://localhost:8000/api/ai-chat/chat/ \
-  -H "Content-Type: application/json" \
-  -d '{"message": "请介绍一下马克思主义的基本原理", "system_prompt_type": "red_culture"}'
+# 测试图片上传
+curl -X POST http://10.0.2.2:8000/api/ai-chat/upload-image/ \
+  -F "image=@example.jpg"
 
-# 测试超出范围的问题
-curl -X POST http://localhost:8000/api/ai-chat/chat/ \
+# 测试带图片的对话（需要先上传图片获取image_id）
+curl -X POST http://10.0.2.2:8000/api/ai-chat/chat-with-images/ \
   -H "Content-Type: application/json" \
-  -d '{"message": "最近有什么明星八卦新闻吗？", "system_prompt_type": "red_culture"}'
+  -d '{"message": "请分析这张图片", "image_ids": ["your_image_id_here"], "image_prompt_type": "detailed"}'
+
+# 测试获取图片理解提示词
+curl http://10.0.2.2:8000/api/ai-chat/image-prompts/
+
+# 测试获取图片缓存统计
+curl http://10.0.2.2:8000/api/ai-chat/image-cache-stats/
+
+# 测试流式对话
+curl -X POST http://10.0.2.2:8000/api/ai-chat/stream/ \
+  -H "Content-Type: application/json" \
+  -d '{"message": "请介绍一下人工智能", "system_prompt_type": "default"}' \
+  --no-buffer
+
+# 测试流式图片对话（需要先上传图片获取image_id）
+curl -X POST http://10.0.2.2:8000/api/ai-chat/stream-with-images/ \
+  -H "Content-Type: application/json" \
+  -d '{"message": "请分析这张图片", "image_ids": ["your_image_id_here"], "image_prompt_type": "detailed"}' \
+  --no-buffer
 ```
 
 ## 注意事项
@@ -435,7 +940,11 @@ curl -X POST http://localhost:8000/api/ai-chat/chat/ \
 3. **内容安全**: 注意用户输入内容的安全性
 4. **成本控制**: 监控token使用量，控制API调用成本
 5. **数据隐私**: 对话内容可能被用于模型训练，注意敏感信息
-6. **🌟 红色文化主题**: 该主题具有严格的回答范围限制，确保内容的政治性和教育性
+6. **图片处理**: 图片会被缓存到Redis中，注意存储空间管理
+7. **图片格式**: 仅支持JPEG、PNG、GIF、WEBP格式，单张图片最大5MB
+8. **缓存管理**: 图片缓存7天后自动过期，可通过统计API监控缓存使用情况
+9. **流式响应**: 流式API使用Server-Sent Events，需要客户端支持流式读取
+10. **连接管理**: 流式连接会保持开启直到完成，注意连接超时设置
 
 ## 更新日志
 
@@ -444,7 +953,18 @@ curl -X POST http://localhost:8000/api/ai-chat/chat/ \
 - 支持自定义系统提示词
 - 支持对话参数调节
 - 完善的错误处理和输入验证
-- **🌟 v1.1.0**: 新增红色文化主题，支持严格的回答范围限制
+- **v1.1.0**: 新增图片理解功能
+- 支持图片上传到Redis缓存
+- 支持单张和批量图片上传
+- 支持带图片的AI对话
+- 支持多种图片理解提示词类型
+- 新增图片缓存统计API
+- 优化为专业的AI知识助手角色
+- **v1.2.0**: 新增流式对话功能
+- 支持流式AI对话（Server-Sent Events）
+- 支持流式带图片的AI对话
+- 实时流式响应，提升用户体验
+- 支持流式文本解读功能
 
 ## 技术支持
 

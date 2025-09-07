@@ -26,6 +26,7 @@ urlpatterns = [
     path('api/ai-chat/', include('ai_chat.urls')),
     path('api/tts/', include('tts_service.urls')),
     path('api/knowledge-quiz/', include('knowledge_quiz.urls')),
+    path('api/knowledge-ai/', include('knowledge_ai.urls')),
     path('api/md-docs/', include('md_docs.urls')),
 ]
 

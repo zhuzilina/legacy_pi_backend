@@ -314,6 +314,234 @@ class AIChatService:
         """
         return IMAGE_PROMPTS
     
+    def stream_chat(self, 
+                   user_message: str,
+                   conversation_history: Optional[List[Dict[str, str]]] = None,
+                   system_prompt_type: str = 'default',
+                   custom_system_prompt: Optional[str] = None,
+                   max_tokens: Optional[int] = None,
+                   temperature: Optional[float] = None):
+        """
+        流式AI对话
+        
+        Args:
+            user_message: 用户输入的消息
+            conversation_history: 对话历史记录
+            system_prompt_type: 系统提示词类型
+            custom_system_prompt: 自定义系统提示词
+            max_tokens: 最大输出token数
+            temperature: 温度参数
+            
+        Yields:
+            流式响应数据块
+        """
+        try:
+            # 设置默认参数
+            max_tokens = max_tokens or self.default_max_tokens
+            temperature = temperature or self.default_temperature
+            
+            # 选择系统提示词
+            if custom_system_prompt:
+                system_prompt = custom_system_prompt
+            else:
+                system_prompt = CHAT_SYSTEM_PROMPTS.get(
+                    system_prompt_type, 
+                    CHAT_SYSTEM_PROMPTS['default']
+                )
+            
+            # 构建消息列表
+            messages = [{"role": "system", "content": system_prompt}]
+            
+            # 添加对话历史
+            if conversation_history:
+                valid_history = self._validate_conversation_history(conversation_history)
+                if valid_history:
+                    messages.extend(valid_history)
+                else:
+                    logger.warning("对话历史格式无效，将忽略历史记录")
+            
+            # 添加当前用户消息
+            messages.append({"role": "user", "content": user_message})
+            
+            # 调用流式大模型API
+            completion = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                stream=True
+            )
+            
+            # 流式返回响应
+            for chunk in completion:
+                if not chunk.choices:
+                    continue
+                
+                delta = chunk.choices[0].delta
+                if hasattr(delta, 'content') and delta.content:
+                    yield {
+                        'type': 'content',
+                        'content': delta.content,
+                        'model': self.model,
+                        'system_prompt_type': system_prompt_type
+                    }
+                elif hasattr(chunk.choices[0], 'finish_reason') and chunk.choices[0].finish_reason:
+                    yield {
+                        'type': 'done',
+                        'finish_reason': chunk.choices[0].finish_reason,
+                        'model': self.model,
+                        'tokens_used': chunk.usage.total_tokens if chunk.usage else None
+                    }
+            
+        except Exception as e:
+            logger.error(f"流式AI对话失败: {str(e)}")
+            yield {
+                'type': 'error',
+                'error': str(e),
+                'model': self.model
+            }
+    
+    def stream_chat_with_images(self, 
+                               user_message: str,
+                               image_ids: List[str],
+                               conversation_history: Optional[List[Dict[str, str]]] = None,
+                               image_prompt_type: str = 'default',
+                               custom_image_prompt: Optional[str] = None,
+                               max_tokens: Optional[int] = None,
+                               temperature: Optional[float] = None):
+        """
+        流式带图片的AI对话
+        
+        Args:
+            user_message: 用户输入的消息
+            image_ids: 图片ID列表
+            conversation_history: 对话历史记录
+            image_prompt_type: 图片理解提示词类型
+            custom_image_prompt: 自定义图片理解提示词
+            max_tokens: 最大输出token数
+            temperature: 温度参数
+            
+        Yields:
+            流式响应数据块
+        """
+        try:
+            # 设置默认参数
+            max_tokens = max_tokens or self.default_max_tokens
+            temperature = temperature or self.default_temperature
+            
+            # 验证图片ID
+            if not image_ids:
+                yield {
+                    'type': 'error',
+                    'error': '图片ID列表不能为空',
+                    'model': self.vision_model
+                }
+                return
+            
+            # 获取图片信息
+            image_data_urls = []
+            for image_id in image_ids:
+                data_url = ai_image_service.get_image_data_url(image_id)
+                if data_url:
+                    image_data_urls.append(data_url)
+                else:
+                    logger.warning(f"图片ID不存在或已过期: {image_id}")
+            
+            if not image_data_urls:
+                yield {
+                    'type': 'error',
+                    'error': '所有图片ID都无效或已过期',
+                    'model': self.vision_model
+                }
+                return
+            
+            # 选择图片理解提示词
+            if custom_image_prompt:
+                image_prompt = custom_image_prompt
+            else:
+                image_prompt = IMAGE_PROMPTS.get(
+                    image_prompt_type, 
+                    IMAGE_PROMPTS['default']
+                )
+            
+            # 构建消息内容
+            content = []
+            
+            # 添加图片
+            for data_url in image_data_urls:
+                content.append({
+                    "type": "image_url",
+                    "image_url": {"url": data_url}
+                })
+            
+            # 添加文本
+            if user_message:
+                content.append({
+                    "type": "text",
+                    "text": user_message
+                })
+            else:
+                content.append({
+                    "type": "text",
+                    "text": image_prompt
+                })
+            
+            # 构建消息列表
+            messages = []
+            
+            # 添加对话历史
+            if conversation_history:
+                valid_history = self._validate_conversation_history(conversation_history)
+                if valid_history:
+                    messages.extend(valid_history)
+                else:
+                    logger.warning("对话历史格式无效，将忽略历史记录")
+            
+            # 添加当前消息
+            messages.append({
+                "role": "user",
+                "content": content
+            })
+            
+            # 调用流式图片理解模型
+            completion = self.client.chat.completions.create(
+                model=self.vision_model,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                stream=True
+            )
+            
+            # 流式返回响应
+            for chunk in completion:
+                if not chunk.choices:
+                    continue
+                
+                delta = chunk.choices[0].delta
+                if hasattr(delta, 'content') and delta.content:
+                    yield {
+                        'type': 'content',
+                        'content': delta.content,
+                        'model': self.vision_model,
+                        'image_prompt_type': image_prompt_type,
+                        'images_processed': len(image_data_urls)
+                    }
+                elif hasattr(chunk.choices[0], 'finish_reason') and chunk.choices[0].finish_reason:
+                    yield {
+                        'type': 'done',
+                        'finish_reason': chunk.choices[0].finish_reason,
+                        'model': self.vision_model,
+                        'tokens_used': chunk.usage.total_tokens if chunk.usage else None
+                    }
+            
+        except Exception as e:
+            logger.error(f"流式图片对话失败: {str(e)}")
+            yield {
+                'type': 'error',
+                'error': str(e),
+                'model': self.vision_model
+            }
+
     def health_check(self) -> Dict[str, Any]:
         """
         健康检查，测试API连接
@@ -335,6 +563,7 @@ class AIChatService:
             return {
                 'status': 'healthy',
                 'model': self.model,
+                'vision_model': self.vision_model,
                 'api_key_configured': bool(AI_MODEL_CONFIG['api_key']),
                 'response_time': 'normal'
             }
@@ -345,6 +574,7 @@ class AIChatService:
                 'status': 'unhealthy',
                 'error': str(e),
                 'model': self.model,
+                'vision_model': self.vision_model,
                 'api_key_configured': bool(AI_MODEL_CONFIG['api_key'])
             }
 

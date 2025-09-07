@@ -18,8 +18,9 @@ urlpatterns = [
     path('upload-image/', views.upload_image, name='upload_image'),
     path('upload-images-batch/', views.upload_images_batch, name='upload_images_batch'),
     
-    # 流式对话API（实验性）
+    # 流式对话API
     path('stream/', views.stream_chat, name='stream_chat'),
+    path('stream-with-images/', views.stream_chat_with_images, name='stream_chat_with_images'),
     
     # 获取系统提示词类型
     path('prompts/', views.get_system_prompts, name='get_system_prompts'),
