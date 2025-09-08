@@ -10,4 +10,8 @@ urlpatterns = [
     
     # 每日一题API
     path('daily-question/', views.get_daily_question, name='daily_question'),
+    
+    # 题目上传API
+    path('upload-question/', views.upload_question, name='upload_question'),
+    path('batch-upload-questions/', views.batch_upload_questions, name='batch_upload_questions'),
 ]

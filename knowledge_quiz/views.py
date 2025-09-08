@@ -4,6 +4,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.core.paginator import Paginator
 from django.db.models import Q
+from django.db import transaction
 import json
 import random
 from .models import Knowledge, Question, Answer, QuizSession, DailyQuestion
@@ -215,6 +216,214 @@ def get_daily_question(request):
             'data': question_data
         })
     
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'error': str(e)
+        }, status=500)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def upload_question(request):
+    """上传单个题目"""
+    try:
+        data = json.loads(request.body)
+        
+        # 验证必填字段
+        required_fields = ['question_text', 'question_type', 'category']
+        for field in required_fields:
+            if field not in data or not data[field]:
+                return JsonResponse({
+                    'success': False,
+                    'error': f'缺少必填字段: {field}'
+                }, status=400)
+        
+        # 验证题目类型
+        valid_question_types = ['choice_single', 'choice_multiple', 'fill']
+        if data['question_type'] not in valid_question_types:
+            return JsonResponse({
+                'success': False,
+                'error': f'无效的题目类型: {data["question_type"]}'
+            }, status=400)
+        
+        # 验证分类
+        valid_categories = ['party_history', 'theory']
+        if data['category'] not in valid_categories:
+            return JsonResponse({
+                'success': False,
+                'error': f'无效的分类: {data["category"]}'
+            }, status=400)
+        
+        # 验证难度
+        valid_difficulties = ['easy', 'medium', 'hard']
+        difficulty = data.get('difficulty', 'medium')
+        if difficulty not in valid_difficulties:
+            return JsonResponse({
+                'success': False,
+                'error': f'无效的难度: {difficulty}'
+            }, status=400)
+        
+        # 创建题目
+        with transaction.atomic():
+            question = Question.objects.create(
+                question_text=data['question_text'],
+                question_type=data['question_type'],
+                category=data['category'],
+                difficulty=difficulty,
+                explanation=data.get('explanation', ''),
+                tags=data.get('tags', '')
+            )
+            
+            # 处理选择题选项
+            if data['question_type'] in ['choice_single', 'choice_multiple']:
+                options = data.get('options', [])
+                if not options:
+                    return JsonResponse({
+                        'success': False,
+                        'error': '选择题必须提供选项'
+                    }, status=400)
+                
+                # 验证选项格式
+                for i, option in enumerate(options):
+                    if not isinstance(option, dict) or 'text' not in option:
+                        return JsonResponse({
+                            'success': False,
+                            'error': f'选项 {i+1} 格式错误'
+                        }, status=400)
+                
+                question.options = options
+                question.save()
+            
+            # 处理填空题答案
+            elif data['question_type'] == 'fill':
+                correct_answer = data.get('correct_answer', '')
+                if not correct_answer:
+                    return JsonResponse({
+                        'success': False,
+                        'error': '填空题必须提供正确答案'
+                    }, status=400)
+                
+                question.correct_answer = correct_answer
+                question.save()
+        
+        return JsonResponse({
+            'success': True,
+            'data': {
+                'question_id': question.id,
+                'message': '题目上传成功'
+            }
+        })
+    
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'error': '无效的JSON格式'
+        }, status=400)
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'error': str(e)
+        }, status=500)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def batch_upload_questions(request):
+    """批量上传题目"""
+    try:
+        data = json.loads(request.body)
+        questions_data = data.get('questions', [])
+        
+        if not questions_data:
+            return JsonResponse({
+                'success': False,
+                'error': '没有提供题目数据'
+            }, status=400)
+        
+        success_count = 0
+        failed_count = 0
+        errors = []
+        
+        with transaction.atomic():
+            for i, question_data in enumerate(questions_data):
+                try:
+                    # 验证必填字段
+                    required_fields = ['question_text', 'question_type', 'category']
+                    for field in required_fields:
+                        if field not in question_data or not question_data[field]:
+                            raise ValueError(f'缺少必填字段: {field}')
+                    
+                    # 验证题目类型
+                    valid_question_types = ['choice_single', 'choice_multiple', 'fill']
+                    if question_data['question_type'] not in valid_question_types:
+                        raise ValueError(f'无效的题目类型: {question_data["question_type"]}')
+                    
+                    # 验证分类
+                    valid_categories = ['party_history', 'theory']
+                    if question_data['category'] not in valid_categories:
+                        raise ValueError(f'无效的分类: {question_data["category"]}')
+                    
+                    # 验证难度
+                    valid_difficulties = ['easy', 'medium', 'hard']
+                    difficulty = question_data.get('difficulty', 'medium')
+                    if difficulty not in valid_difficulties:
+                        raise ValueError(f'无效的难度: {difficulty}')
+                    
+                    # 创建题目
+                    question = Question.objects.create(
+                        question_text=question_data['question_text'],
+                        question_type=question_data['question_type'],
+                        category=question_data['category'],
+                        difficulty=difficulty,
+                        explanation=question_data.get('explanation', ''),
+                        tags=question_data.get('tags', '')
+                    )
+                    
+                    # 处理选择题选项
+                    if question_data['question_type'] in ['choice_single', 'choice_multiple']:
+                        options = question_data.get('options', [])
+                        if not options:
+                            raise ValueError('选择题必须提供选项')
+                        
+                        # 验证选项格式
+                        for j, option in enumerate(options):
+                            if not isinstance(option, dict) or 'text' not in option:
+                                raise ValueError(f'选项 {j+1} 格式错误')
+                        
+                        question.options = options
+                        question.save()
+                    
+                    # 处理填空题答案
+                    elif question_data['question_type'] == 'fill':
+                        correct_answer = question_data.get('correct_answer', '')
+                        if not correct_answer:
+                            raise ValueError('填空题必须提供正确答案')
+                        
+                        question.correct_answer = correct_answer
+                        question.save()
+                    
+                    success_count += 1
+                    
+                except Exception as e:
+                    failed_count += 1
+                    errors.append(f'题目 {i+1}: {str(e)}')
+        
+        return JsonResponse({
+            'success': True,
+            'data': {
+                'total': len(questions_data),
+                'success_count': success_count,
+                'failed_count': failed_count,
+                'errors': errors
+            }
+        })
+    
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'error': '无效的JSON格式'
+        }, status=400)
     except Exception as e:
         return JsonResponse({
             'success': False,

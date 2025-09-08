@@ -9,3 +9,5 @@ lxml>=4.9.0
 edge-tts>=6.1.0
 pymongo>=4.0.0
 uwsgi>=2.0.21
+pandas>=2.0.0
+openpyxl>=3.1.0
