@@ -25,11 +25,26 @@ def get_daily_articles(request):
     """
     try:
         today = timezone.now().date()
+        today_str = today.isoformat()
         
-        # 检查是否是新的一天，如果是则清理昨天的数据
+        # 检查是否是新的一天，如果是则清理昨天的数据并重置状态
+        yesterday = today - timedelta(days=1)
+        yesterday_str = yesterday.isoformat()
+        
+        # 清理昨天的数据
         deleted_count = RedisStats.clear_old_data(days_to_keep=1)
         if deleted_count > 0:
             logger.info(f"清理了 {deleted_count} 篇昨日文章")
+        
+        # 清理昨天的状态和锁，确保新的一天能正常开始
+        try:
+            yesterday_status_key = f"crawl_status:{yesterday_str}"
+            yesterday_lock_key = f"daily_crawl_lock:{yesterday_str}"
+            redis_service.redis_client.delete(yesterday_status_key)
+            redis_service.redis_client.delete(yesterday_lock_key)
+            logger.info(f"清理了昨天的状态和锁: {yesterday_str}")
+        except Exception as e:
+            logger.warning(f"清理昨天状态失败: {e}")
         
         # 先看今日状态
         status = redis_service.get_daily_crawl_status()
@@ -47,6 +62,7 @@ def get_daily_articles(request):
             })
 
         # 无缓存数据，如果状态为running，避免重复开启
+        # 但是如果状态是failed，则允许重新开始
         if status == 'running':
             return JsonResponse({
                 'msg': 'crawling_started',
@@ -54,6 +70,12 @@ def get_daily_articles(request):
                 'status': 'crawling',
                 'message': '爬取任务正在进行，请稍后再次请求获取结果'
             })
+        
+        # 如果状态是failed，清理状态并重新开始
+        if status == 'failed':
+            logger.info("检测到昨天的失败状态，清理并重新开始")
+            redis_service.redis_client.delete(f"crawl_status:{today_str}")
+            redis_service.redis_client.delete(f"daily_crawl_lock:{today_str}")
 
         # 竞争锁，确保同一时间只有一个请求能启动任务
         if not redis_service.acquire_daily_crawl_lock():
@@ -276,4 +298,68 @@ def get_cached_image(request, image_id):
     except Exception as e:
         logger.error(f"获取缓存图片失败: {str(e)}")
         return HttpResponse(f'获取图片失败: {str(e)}', status=500, content_type='text/plain; charset=utf-8')
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def reset_daily_crawler(request):
+    """
+    重置每日爬虫状态
+    用于解决第二天无法获取新数据的问题
+    """
+    try:
+        today = timezone.now().date()
+        today_str = today.isoformat()
+        
+        logger.info(f"手动重置每日爬虫状态: {today_str}")
+        
+        # 1. 清理今日状态
+        today_status_key = f"crawl_status:{today_str}"
+        today_lock_key = f"daily_crawl_lock:{today_str}"
+        redis_service.redis_client.delete(today_status_key)
+        redis_service.redis_client.delete(today_lock_key)
+        
+        # 2. 清理昨日状态
+        yesterday = today - timedelta(days=1)
+        yesterday_str = yesterday.isoformat()
+        yesterday_status_key = f"crawl_status:{yesterday_str}"
+        yesterday_lock_key = f"daily_crawl_lock:{yesterday_str}"
+        redis_service.redis_client.delete(yesterday_status_key)
+        redis_service.redis_client.delete(yesterday_lock_key)
+        
+        # 3. 清理旧数据
+        deleted_count = RedisStats.clear_old_data(days_to_keep=1)
+        
+        # 4. 清理更早的状态（可选）
+        for days_ago in range(2, 7):
+            old_date = today - timedelta(days=days_ago)
+            old_date_str = old_date.isoformat()
+            old_status_key = f"crawl_status:{old_date_str}"
+            old_lock_key = f"daily_crawl_lock:{old_date_str}"
+            redis_service.redis_client.delete(old_status_key)
+            redis_service.redis_client.delete(old_lock_key)
+        
+        logger.info(f"重置完成，清理了 {deleted_count} 篇旧文章")
+        
+        return JsonResponse({
+            'success': True,
+            'message': '每日爬虫状态已重置',
+            'data': {
+                'reset_date': today_str,
+                'deleted_articles': deleted_count,
+                'cleared_status_keys': [
+                    today_status_key,
+                    yesterday_status_key,
+                    today_lock_key,
+                    yesterday_lock_key
+                ]
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"重置每日爬虫状态失败: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': str(e)
+        }, status=500)
 

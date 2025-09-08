@@ -16,5 +16,6 @@ urlpatterns = [
     # 图片API：获取缓存的图片
     path('image/<str:image_id>/', views.get_cached_image, name='cached_image'),
     
-
+    # 管理API：重置每日爬虫状态
+    path('reset/', views.reset_daily_crawler, name='reset_daily_crawler'),
 ]
