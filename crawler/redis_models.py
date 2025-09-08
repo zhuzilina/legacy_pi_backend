@@ -251,6 +251,29 @@ class RedisCrawlTask:
             return None
     
     @classmethod
+    def filter(cls, **kwargs):
+        """过滤任务"""
+        try:
+            # 获取所有任务
+            task_ids = redis_service.get_all_task_ids()
+            tasks = []
+            
+            for task_id in task_ids:
+                task_data = redis_service.get_task(task_id)
+                if task_data:
+                    task = cls.from_dict(task_data)
+                    tasks.append(task)
+            
+            # 按创建时间排序（最新的在前）
+            tasks.sort(key=lambda x: x.created_at or '', reverse=True)
+            
+            return tasks
+            
+        except Exception as e:
+            logger.error(f"过滤任务失败: {str(e)}")
+            return []
+    
+    @classmethod
     def create(cls, **kwargs):
         """创建新任务"""
         task = cls(**kwargs)

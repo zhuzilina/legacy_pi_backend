@@ -280,14 +280,34 @@ class PeopleNetCrawler:
                 response.raise_for_status()
                 response.encoding = 'utf-8'
                 
+                logger.debug(f"获取文章网页响应: {link_info['title']}, 状态码: {response.status_code}, 内容长度: {len(response.text)}")
+                
                 if len(response.text) > 1000 and 'setTimeout' not in response.text:
                     soup = BeautifulSoup(response.text, 'html.parser')
                     logger.debug(f"成功获取文章网页内容: {link_info['title']}")
                 else:
-                    logger.debug(f"文章页面返回重定向，尝试本地文件: {link_info['title']}")
+                    logger.warning(f"文章页面内容不足或重定向: {link_info['title']}, 长度: {len(response.text)}, setTimeout: {'setTimeout' in response.text}")
+                    
+                    # 如果第一次请求失败，等待一段时间后重试
+                    if len(response.text) < 1000 or 'setTimeout' in response.text:
+                        logger.info(f"检测到反爬虫机制，等待2秒后重试: {link_info['title']}")
+                        time.sleep(2)
+                        
+                        # 重试请求
+                        response = self.session.get(url, timeout=30)
+                        response.raise_for_status()
+                        response.encoding = 'utf-8'
+                        
+                        logger.debug(f"重试获取文章网页响应: {link_info['title']}, 状态码: {response.status_code}, 内容长度: {len(response.text)}")
+                        
+                        if len(response.text) > 1000 and 'setTimeout' not in response.text:
+                            soup = BeautifulSoup(response.text, 'html.parser')
+                            logger.debug(f"重试成功获取文章网页内容: {link_info['title']}")
+                        else:
+                            logger.warning(f"重试后仍然无法获取内容: {link_info['title']}")
                     
             except Exception as e:
-                logger.debug(f"无法获取文章网页内容: {link_info['title']} - {str(e)}")
+                logger.error(f"无法获取文章网页内容: {link_info['title']} - {str(e)}")
             
             # 如果无法从网站获取内容，跳过这篇文章
             if soup is None:
@@ -422,10 +442,14 @@ class PeopleNetCrawler:
         try:
             # 查找正文容器
             content_selectors = [
+                '.main',
                 '.rm_txt_con',
                 '.content',
                 '.article-content',
-                '#content'
+                '#content',
+                '.article-body',
+                '.post-content',
+                '.entry-content'
             ]
             
             content_element = None
@@ -436,7 +460,19 @@ class PeopleNetCrawler:
                     break
             
             if not content_element:
-                return "", {}
+                # 如果没找到内容，尝试更通用的方法
+                # 查找包含大量文本的元素
+                all_divs = soup.find_all('div')
+                for div in all_divs:
+                    text = div.get_text(strip=True)
+                    if len(text) > 500:  # 至少500个字符
+                        # 检查是否包含文章内容的关键词
+                        if any(keyword in text for keyword in ['习近平', '中国', '发展', '经济', '政治', '社会', '建设', '改革']):
+                            content_element = div
+                            break
+                
+                if not content_element:
+                    return "", {}
             
             # 移除不需要的元素
             for unwanted in content_element.select('.edit, .paper_num, .share, .ad, script, style'):

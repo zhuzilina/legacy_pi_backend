@@ -197,6 +197,17 @@ class RedisService:
             logger.error(f"获取任务失败: {str(e)}")
             return None
     
+    def get_all_task_ids(self):
+        """获取所有任务ID"""
+        try:
+            pattern = "task:*"
+            keys = self.redis_client.keys(pattern)
+            task_ids = [key.decode('utf-8').replace('task:', '') for key in keys]
+            return task_ids
+        except Exception as e:
+            logger.error(f"获取任务ID列表失败: {str(e)}")
+            return []
+    
     def update_task(self, task_id, updates):
         """更新任务信息"""
         try:
