@@ -5,7 +5,13 @@ import logging
 import html as html_lib
 from datetime import datetime
 from urllib.parse import urljoin, urlparse
-from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from bs4 import BeautifulSoup, Comment
 from django.utils import timezone
 from django.conf import settings
 from .redis_models import RedisNewsArticle, RedisCrawlTask
@@ -20,14 +26,14 @@ class PeopleNetCrawler:
     def __init__(self):
         self.base_url = "http://www.people.com.cn"
         self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7',
             'Accept-Encoding': 'gzip, deflate',
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
             'Referer': 'http://www.people.com.cn/',
-            'Cache-Control': 'no-cache',
+            'Cache-Control': 'max-age=0',
         }
         self.session = requests.Session()
         self.session.headers.update(self.headers)
@@ -35,26 +41,27 @@ class PeopleNetCrawler:
         self.session.max_redirects = 3
     
     def crawl_today_news(self, task_id=None):
-        """爬取今日要闻"""
+        """爬取今日要闻 (新版：直接从目标URL获取)"""
         try:
+            # 目标URL
+            target_url = "http://www.people.com.cn/GB/59476/index.html"
+            
             # 更新任务状态
             if task_id:
                 task = RedisCrawlTask.get(task_id)
                 if task:
                     task.update(status='running', started_at=timezone.now().isoformat())
             
-            logger.info("开始爬取今日要闻")
+            logger.info(f"开始爬取今日要闻，目标URL: {target_url}")
             
-            # 策略1: 尝试从人民网首页获取今日要闻
-            news_links = self._get_news_from_homepage()
-            
-            # 策略2: 如果首页失败，尝试直接访问今日要闻页面
-            if not news_links:
-                logger.info("首页获取失败，尝试直接访问今日要闻页面")
-                news_links = self._get_news_from_direct_page()
+            # 获取新闻链接
+            # 获取今日号数
+            now = datetime.now()
+            news_links = self._get_tody_news_url(target_url,now.day)
             
             if not news_links:
-                raise Exception("无法获取任何新闻链接")
+                # 如果获取失败，直接抛出异常，而不是尝试其他策略
+                raise Exception(f"无法从目标URL {target_url} 获取任何新闻链接")
             
             logger.info(f"找到 {len(news_links)} 条新闻链接")
             
@@ -64,10 +71,10 @@ class PeopleNetCrawler:
             success_count = 0
             failed_count = 0
             
-            # 爬取每篇文章的详细内容
-            for i, link_info in enumerate(news_links, 1):
+            # 爬取每篇文章的详细内容 (这部分逻辑保持不变)
+            for i, link_info in enumerate(news_links):
                 try:
-                    logger.info(f"正在爬取第 {i}/{len(news_links)} 篇文章: {link_info['title']}")
+                    logger.info(f"正在爬取第 {i+1}/{len(news_links)} 篇文章: {link_info['title']}")
                     
                     article_data = self._crawl_article_detail(link_info)
                     if article_data:
@@ -114,197 +121,162 @@ class PeopleNetCrawler:
             logger.error(error_msg)
             
             if task_id:
-                task.update(
-                    status='failed',
-                    error_message=error_msg,
-                    completed_at=timezone.now().isoformat()
-                )
+                task = RedisCrawlTask.get(task_id)
+                if task:
+                    task.update(
+                        status='failed',
+                        error_message=error_msg,
+                        completed_at=timezone.now().isoformat()
+                    )
             
             return {
                 'success': False,
                 'message': error_msg
             }
     
-    def _get_news_from_homepage(self):
-        """从人民网首页获取今日要闻"""
+    def _get_tody_news_url(self,url,target_date):
+        """
+        爬取今日要闻所有文章的链接。
+
+        参数:
+            url (str): 想要爬取的网站的URL。
+            target_data (int): 目标日期的天数。
+
+        返回:
+            str: 网站源代码。
+        """
+        # 创建一个 Options 对象
+        chrome_options = Options()
+        # 添加无头模式参数
+        chrome_options.add_argument("--headless")
+        # 附加推荐参数（在某些服务器环境下可以避免奇怪的问题）
+        chrome_options.add_argument("--disable-gpu") # 禁用GPU硬件加速。在无头模式下通常是推荐的。
+        chrome_options.add_argument("--no-sandbox") # 在Linux服务器上运行时，有时需要此参数来解决权限问题。
+        chrome_options.add_argument("--window-size=1920,1080") # 设置一个固定的窗口大小，避免因默认窗口过小导致某些元素不可见。
+        # 初始化webdriver
+        driver = webdriver.Chrome(options=chrome_options)
+        # 记录原始窗口的句柄
+        original_window = driver.current_window_handle
         try:
-            logger.info("尝试从人民网首页获取今日要闻")
-            
-            # 访问人民网首页
-            response = self.session.get(self.base_url, timeout=30)
-            response.raise_for_status()
-            response.encoding = 'utf-8'
-            
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # 查找今日要闻区域
-            news_links = []
-            
-            # 方法1: 查找包含"今日要闻"的区域
-            news_sections = soup.find_all(['div', 'section'], string=re.compile(r'今日要闻|要闻|头条'))
-            
-            # 方法2: 查找特定的新闻区域
-            if not news_sections:
-                news_sections = soup.find_all(['div', 'section'], class_=re.compile(r'news|headline|main'))
-            
-            # 方法3: 查找所有可能包含新闻链接的区域
-            if not news_sections:
-                news_sections = soup.find_all(['div', 'section', 'ul', 'ol'])
-            
-            for section in news_sections:
-                links = section.find_all('a', href=True)
-                for link in links:
-                    href = link.get('href')
-                    title = link.get_text(strip=True)
-                    
-                    if href and title and len(title) > 5:
-                        # 处理相对链接
-                        if href.startswith('http'):
-                            full_url = href
-                        else:
-                            full_url = urljoin(self.base_url, href)
-                        
-                        # 只处理人民网的文章链接
-                        if 'people.com.cn' in full_url and ('/n1/' in full_url or '/GB/' in full_url):
-                            news_links.append({
-                                'title': title,
-                                'url': full_url
-                            })
-                            logger.debug(f"从首页添加新闻链接: {title}")
-            
-            # 去重
-            seen_urls = set()
-            unique_links = []
-            for link in news_links:
-                if link['url'] not in seen_urls:
-                    seen_urls.add(link['url'])
-                    unique_links.append(link)
-            
-            logger.info(f"从首页找到 {len(unique_links)} 条唯一新闻链接")
-            return unique_links[:15]  # 限制数量
-            
-        except Exception as e:
-            logger.error(f"从首页获取新闻失败: {str(e)}")
-            return []
-    
-    def _get_news_from_direct_page(self):
-        """直接从今日要闻页面获取新闻"""
-        try:
-            logger.info("尝试直接访问今日要闻页面")
-            
-            # 尝试多个可能的今日要闻页面
-            possible_urls = [
-                "http://www.people.com.cn/GB/59476/",  # 最有效的URL，放在首位
-                "http://www.people.com.cn/GB/",
-                "http://www.people.com.cn/GB/59476/index.html"  # 会重定向，放在最后
-            ]
-            
-            for url in possible_urls:
-                try:
-                    logger.info(f"尝试访问: {url}")
-                    response = self.session.get(url, timeout=30)
-                    response.raise_for_status()
-                    response.encoding = 'utf-8'
-                    
-                    # 检查是否获取到了实际内容
-                    if len(response.text) > 1000 and 'setTimeout' not in response.text:
-                        soup = BeautifulSoup(response.text, 'html.parser')
-                        news_links = self._extract_news_links(soup)
-                        if news_links:
-                            logger.info(f"从 {url} 成功获取 {len(news_links)} 条新闻")
-                            return news_links
-                    else:
-                        logger.warning(f"{url} 返回重定向页面")
-                        
-                except Exception as e:
-                    logger.warning(f"访问 {url} 失败: {str(e)}")
-                    continue
-            
-            logger.error("所有直接页面都无法获取新闻")
-            return []
-            
-        except Exception as e:
-            logger.error(f"直接页面获取新闻失败: {str(e)}")
-            return []
-    
-    def _extract_news_links(self, soup):
-        """从页面提取新闻链接"""
-        news_links = []
-        
-        try:
-            # 查找所有可能的新闻链接
-            all_links = soup.find_all('a', href=True)
-            
-            for link in all_links:
-                href = link.get('href')
-                title = link.get_text(strip=True)
+            # 1. 发送HTTP请求-进入日历页
+            driver.get(url)
+
+            # 检查请求是否成功 (状态码 200 表示成功)
+            print("页面初次加载，等待 JavaScript 跳转...")
+            time.sleep(2) # 等待2秒，比JS的1秒要长
+
+            try:
+                # 等待 iframe 出现并切换进去
+                iframe = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.TAG_NAME, "iframe"))
+                )
+                driver.switch_to.frame(iframe)
+                print("已切换到 iframe 内部。")
+                print(f"正在查找并点击日期 '{target_date}' 的链接...")
+                date_link_xpath = f"//a[font/text()='{target_date}']"
+                date_link = WebDriverWait(driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, date_link_xpath))
+                )
+                date_link.click()
+                print("成功点击日期链接。")
+                # 等待新窗口出现
+                WebDriverWait(driver, 10).until(EC.number_of_windows_to_be(2))
+
+                print("正在切换到新打开的新闻列表标签页...")
+                for window_handle in driver.window_handles:
+                    if window_handle != original_window:
+                        driver.switch_to.window(window_handle)
+                        break
                 
-                if href and title and len(title) > 5:
-                    # 处理相对链接
-                    if href.startswith('http'):
-                        full_url = href
-                    else:
-                        full_url = urljoin(self.base_url, href)
-                    
-                    # 只处理人民网的文章链接
-                    if 'people.com.cn' in full_url and ('/n1/' in full_url or '/GB/' in full_url):
-                        news_links.append({
-                            'title': title,
-                            'url': full_url
-                        })
-            
-            # 去重
-            seen_urls = set()
-            unique_links = []
-            for link in news_links:
-                if link['url'] not in seen_urls:
-                    seen_urls.add(link['url'])
-                    unique_links.append(link)
-            
-            logger.info(f"提取到 {len(unique_links)} 条唯一新闻链接")
-            return unique_links[:15]  # 限制数量
-            
+                print(f"已切换到新窗口，URL: {driver.current_url}")
+
+                # 等待新闻列表的关键元素 <td class="p6"> 加载完成
+                wait = WebDriverWait(driver, 10)
+                wait.until(EC.presence_of_element_located((By.CLASS_NAME, "p6")))
+                print("新闻列表页面加载完成！")
+            except Exception as e:
+                print(f"未找到或无法切换到 iframe，将在主页面继续操作。错误: {e}")
+
+            # 2. 获取HTML内容
+            page_source = driver.page_source
+            return self._parse_news_data(page_source)
         except Exception as e:
-            logger.error(f"提取新闻链接失败: {str(e)}")
-            return []
+            print(f"发生错误: {e}")
+        finally:
+            driver.quit()
+    
+    def _parse_news_data(self,html_content):
+        """
+        专门解析人民网历史回顾页面的HTML，提取“新闻排行榜”和“今日要闻”的标题和数据。
+
+        参数:
+            html_content (str): 包含新闻列表的完整HTML页面源码。
+
+        返回:
+            dict: 一个字典，包含两个键 "news_ranking" 和 "todays_news"，
+                它们的值都是一个列表，列表中的每个元素是包含 'title' 和 'url' 的字典。
+        """
+        if not html_content:
+            print("错误：传入的 HTML 内容为空。")
+            return {"news_ranking": [], "todays_news": []}
+
+        soup = BeautifulSoup(html_content, 'html.parser')
+
+        # --- 提取“今日要闻” ---
+        todays_news_list = []
+        # “今日要闻”的数据在 class="p6" 的 <td> 元素中
+        news_container = soup.find('td', class_='p6')
+        if news_container:
+            # 直接在容器内查找所有的 <a> 标签，这样最简单直接
+            # 因为一个 <li> 可能包含多个 <br> 分隔的 <a>
+            all_links_in_container = news_container.find_all('a')
+            for link in all_links_in_container:
+                title = link.text.strip()
+                url = link.get('href', '').strip()
+                if title and url: # 确保标题和链接都有效
+                    todays_news_list.append({
+                        "title": title,
+                        "url": url
+                    })
+
+        return todays_news_list
+    
     
     def _crawl_article_detail(self, link_info):
         """爬取文章详细内容"""
         try:
             url = link_info['url']
             soup = None
-            
+            logger.info(f"开始从这里获取文章：{url}")
             # 尝试从网站获取内容
             try:
-                response = self.session.get(url, timeout=30)
-                response.raise_for_status()
-                response.encoding = 'utf-8'
-                
-                logger.debug(f"获取文章网页响应: {link_info['title']}, 状态码: {response.status_code}, 内容长度: {len(response.text)}")
-                
-                if len(response.text) > 1000 and 'setTimeout' not in response.text:
-                    soup = BeautifulSoup(response.text, 'html.parser')
-                    logger.debug(f"成功获取文章网页内容: {link_info['title']}")
-                else:
-                    logger.warning(f"文章页面内容不足或重定向: {link_info['title']}, 长度: {len(response.text)}, setTimeout: {'setTimeout' in response.text}")
+                # 创建一个 Options 对象
+                chrome_options = Options()
+                # 添加无头模式参数
+                chrome_options.add_argument("--headless")
+                # 附加推荐参数（在某些服务器环境下可以避免奇怪的问题）
+                chrome_options.add_argument("--disable-gpu") # 禁用GPU硬件加速。在无头模式下通常是推荐的。
+                chrome_options.add_argument("--no-sandbox") # 在Linux服务器上运行时，有时需要此参数来解决权限问题。
+                chrome_options.add_argument("--window-size=1920,1080") # 设置一个固定的窗口大小，避免因默认窗口过小导致某些元素不可见。
+                # 初始化webdriver
+                driver = webdriver.Chrome(options=chrome_options)
+                article_content = None
+                # 初始化变量以存储提取的内容
+                try:
+                    # 1. 发送HTTP请求
+                    driver.get(url)
+                    # 2. 获取HTML内容
+                    page_source = driver.page_source
+                    # 3.提取文章结构部分
+                    article_content = self._extract_article_content(page_source)
                     
-                    # 如果第一次请求失败，等待一段时间后重试
-                    if len(response.text) < 1000 or 'setTimeout' in response.text:
-                        logger.info(f"检测到反爬虫机制，等待2秒后重试: {link_info['title']}")
-                        time.sleep(2)
-                        
-                        # 重试请求
-                        response = self.session.get(url, timeout=30)
-                        response.raise_for_status()
-                        response.encoding = 'utf-8'
-                        
-                        logger.debug(f"重试获取文章网页响应: {link_info['title']}, 状态码: {response.status_code}, 内容长度: {len(response.text)}")
-                        
-                        if len(response.text) > 1000 and 'setTimeout' not in response.text:
-                            soup = BeautifulSoup(response.text, 'html.parser')
-                            logger.debug(f"重试成功获取文章网页内容: {link_info['title']}")
-                        else:
-                            logger.warning(f"重试后仍然无法获取内容: {link_info['title']}")
+                    if not article_content:
+                        raise ValueError("错误：未能通过任何一种方法定位到文章内容。")
+                    soup = BeautifulSoup(article_content, 'html.parser')
+                except Exception as e:
+                    print(f"发生错误: {e}")
+                finally:
+                    driver.quit()
                     
             except Exception as e:
                 logger.error(f"无法获取文章网页内容: {link_info['title']} - {str(e)}")
@@ -344,6 +316,45 @@ class PeopleNetCrawler:
         except Exception as e:
             logger.error(f"爬取文章详情时出错 {link_info['url']}: {str(e)}")
             return None
+    
+    def _extract_article_content(self,page_source):
+        """
+        从HTML源码中智能提取主要文章内容的函数。
+        它会按顺序尝试多种策略，一旦成功即返回结果。
+
+        参数:
+            page_source (str): 网页的HTML源代码。
+
+        返回:
+            str: 格式化后的文章内容HTML，如果所有策略都失败则返回None。
+        """
+        soup = BeautifulSoup(page_source, 'html.parser')
+        
+        # 策略 1: 精确查找 '<!--内容-->' 注释标记。
+        # 这种模式下，内容通常在注释标记下方的第一个div的第一个子div中。
+        comment_start = soup.find(string=lambda text: isinstance(text, Comment) and text.strip() == '内容')
+        if comment_start:
+            content_wrapper_div = comment_start.find_next_sibling('div')
+            if content_wrapper_div:
+                # 提取其第一个子div作为文章主体
+                article_div = content_wrapper_div.find('div', recursive=False)
+                if article_div:
+                    print("信息：通过 '<!--内容-->' (策略1) 成功提取。")
+                    return article_div.prettify()
+
+        # 策略 2: 精确查找 '<!--结束正文-->' 注释标记。
+        # 这种模式下，文章内容就是注释标记紧邻的前一个div。
+        comment_end = soup.find(string=lambda text: isinstance(text, Comment) and text.strip() == '结束正文')
+        if comment_end:
+            # 提取紧邻的前一个兄弟div作为文章主体
+            article_div = comment_end.find_previous_sibling('div')
+            if article_div:
+                print("信息：通过 '<!--结束正文-->' (策略2) 成功提取。")
+                return article_div.prettify()
+
+        # 如果两种策略都失败，返回None
+        print("警告：所有提取策略均失败，未能定位到文章内容。")
+        return None
     
     def _extract_title(self, soup, fallback_title):
         """提取文章标题"""
