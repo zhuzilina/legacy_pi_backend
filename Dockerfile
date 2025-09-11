@@ -35,6 +35,10 @@ RUN pip install uwsgi[python3]
 # 复制项目文件
 COPY . .
 
+# 复制 chromedriver 并为其添加执行权限
+COPY chromedriver-linux64/chromedriver /usr/local/bin/chromedriver
+RUN chmod +x /usr/local/bin/chromedriver
+
 # 创建必要的目录
 RUN mkdir -p media/md_docs/images media/tts static /var/log/uwsgi
 
