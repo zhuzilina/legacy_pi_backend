@@ -26,7 +26,8 @@ RUN apt-get update && apt-get install -y \
 
 # 复制 requirements.txt 并安装 Python 依赖
 COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip && \
+RUN pip install --no-cache-dir -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple --upgrade pip && \
+    pip config set global.index-url https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple && \
     pip install --no-cache-dir -r requirements.txt
 
 # 安装 uWSGI 服务器 (包含Python支持)
