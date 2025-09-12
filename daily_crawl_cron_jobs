@@ -1,0 +1,4 @@
+# m h  dom mon dow   user	command
+# 每天凌晨 1:00 执行每日爬取任务
+0 1 * * * root cd /app && python manage.py start_daily_crawl >> /var/log/supervisor/cron.log 2>&1
+#

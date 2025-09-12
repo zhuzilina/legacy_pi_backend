@@ -13,9 +13,26 @@ from .redis_models import RedisNewsArticle, RedisCrawlTask, RedisStats
 from .redis_service import redis_service
 from .services import PeopleNetCrawler
 from .image_service import image_cache_service
+from .tasks import run_daily_crawler_task
 
 logger = logging.getLogger(__name__)
 
+# def run_daily_crawler():
+        #     try:
+        #         crawler = PeopleNetCrawler()
+        #         result = crawler.crawl_today_news(task_id=task.id)
+        #         logger.info(f"每日爬取任务完成: {result}")
+        #         redis_service.set_daily_crawl_status('completed')
+        #     except Exception as e:
+        #         logger.error(f"每日爬取任务失败: {str(e)}")
+        #         redis_service.set_daily_crawl_status('failed')
+        #     finally:
+        #         # 释放锁
+        #         redis_service.release_daily_crawl_lock()
+
+        # thread = threading.Thread(target=run_daily_crawler)
+        # thread.daemon = True
+        # thread.start()
 @csrf_exempt
 @require_http_methods(["GET"])
 def get_daily_articles(request):
@@ -25,105 +42,50 @@ def get_daily_articles(request):
     """
     try:
         today = timezone.now().date()
-        today_str = today.isoformat()
-        
-        # 检查是否是新的一天，如果是则清理昨天的数据并重置状态
-        yesterday = today - timedelta(days=1)
-        yesterday_str = yesterday.isoformat()
-        
-        # 清理昨天的数据
-        deleted_count = RedisStats.clear_old_data(days_to_keep=1)
-        if deleted_count > 0:
-            logger.info(f"清理了 {deleted_count} 篇昨日文章")
-        
-        # 清理昨天的状态和锁，确保新的一天能正常开始
-        try:
-            yesterday_status_key = f"crawl_status:{yesterday_str}"
-            yesterday_lock_key = f"daily_crawl_lock:{yesterday_str}"
-            redis_service.redis_client.delete(yesterday_status_key)
-            redis_service.redis_client.delete(yesterday_lock_key)
-            logger.info(f"清理了昨天的状态和锁: {yesterday_str}")
-        except Exception as e:
-            logger.warning(f"清理昨天状态失败: {e}")
-        
-        # 先看今日状态
         status = redis_service.get_daily_crawl_status()
 
-        # 如果今天已有成功数据，直接返回
+        # 尝试获取已成功的文章
         today_article_ids = RedisNewsArticle.filter(crawl_status='success')
         today_article_ids = [article.id for article in today_article_ids]
+
         if today_article_ids:
+            # 如果有成功的数据，直接返回
             return JsonResponse({
                 'msg': 'success',
                 'crawl_date': today.strftime('%Y-%m-%d'),
                 'total_articles': len(today_article_ids),
                 'article_ids': today_article_ids,
-                'status': 'cached'
-            })
-
-        # 无缓存数据，如果状态为running，避免重复开启
-        # 但是如果状态是failed，则允许重新开始
-        if status == 'running':
-            return JsonResponse({
-                'msg': 'crawling_started',
-                'crawl_date': today.strftime('%Y-%m-%d'),
-                'status': 'crawling',
-                'message': '爬取任务正在进行，请稍后再次请求获取结果'
+                'status': 'completed' # 状态可以叫 completed 或 cached
             })
         
-        # 如果状态是failed，清理状态并重新开始
-        if status == 'failed':
-            logger.info("检测到昨天的失败状态，清理并重新开始")
-            redis_service.redis_client.delete(f"crawl_status:{today_str}")
-            redis_service.redis_client.delete(f"daily_crawl_lock:{today_str}")
-
-        # 竞争锁，确保同一时间只有一个请求能启动任务
-        if not redis_service.acquire_daily_crawl_lock():
+        # 如果没有成功的数据，根据状态返回不同信息
+        if status == 'running':
             return JsonResponse({
-                'msg': 'crawling_started',
+                'msg': 'crawling_in_progress',
                 'crawl_date': today.strftime('%Y-%m-%d'),
                 'status': 'crawling',
-                'message': '爬取任务正在进行，请稍后再次请求获取结果'
+                'message': '每日文章正在爬取中，请稍后重试。'
             })
+        
+        if status == 'failed':
+            return JsonResponse({
+                'msg': 'crawl_failed',
+                'crawl_date': today.strftime('%Y-%m-%d'),
+                'status': 'failed',
+                'message': '今日文章爬取失败，请联系管理员。'
+            }, status=500)
 
-        # 设置状态为running
-        redis_service.set_daily_crawl_status('running')
-
-        # 创建任务并后台运行
-        task = RedisCrawlTask.create(
-            task_name=f'每日爬取-{today.strftime("%Y-%m-%d")}',
-            target_url='http://www.people.com.cn/GB/59476/index.html',
-            task_type='full'
-        )
-
-        def run_daily_crawler():
-            try:
-                crawler = PeopleNetCrawler()
-                result = crawler.crawl_today_news(task_id=task.id)
-                logger.info(f"每日爬取任务完成: {result}")
-                redis_service.set_daily_crawl_status('completed')
-            except Exception as e:
-                logger.error(f"每日爬取任务失败: {str(e)}")
-                redis_service.set_daily_crawl_status('failed')
-            finally:
-                # 释放锁
-                redis_service.release_daily_crawl_lock()
-
-        thread = threading.Thread(target=run_daily_crawler)
-        thread.daemon = True
-        thread.start()
-
+        # 默认情况，例如任务还未开始
         return JsonResponse({
-            'msg': 'crawling_started',
+            'msg': 'no_data_yet',
             'crawl_date': today.strftime('%Y-%m-%d'),
-            'task_id': task.id if task else None,
-            'status': 'crawling',
-            'message': '爬取任务已启动，请稍后再次请求获取结果'
+            'status': 'pending',
+            'message': '今日文章尚未开始爬取或暂无数据。'
         })
-            
+    
     except Exception as e:
-        logger.error(f"获取每日文章失败: {str(e)}")
-        return JsonResponse({'error': str(e)}, status=500)
+        logger.error(f"查询每日文章失败: {str(e)}")
+        return JsonResponse({'error': f"服务器内部错误: {str(e)}"}, status=500)
 
 @csrf_exempt
 @require_http_methods(["GET"])
@@ -193,22 +155,22 @@ def get_article_markdown(request, article_id):
 
         markdown_content = f"""# {article.title}
 
-**来源**: {article.source}  
-**发布时间**: {publish_date_str}  
-**分类**: {article.category}  
-**字数**: {article.word_count}  
-**原文链接**: [{article.url}]({article.url})
+                        **来源**: {article.source}  
+                        **发布时间**: {publish_date_str}  
+                        **分类**: {article.category}  
+                        **字数**: {article.word_count}  
+                        **原文链接**: [{article.url}]({article.url})
 
----
+                        ---
 
-{article.markdown_content}
+                        {article.markdown_content}
 
----
+                        ---
 
-*本文由人民网爬虫系统自动采集整理*  
-*采集时间: {created_at_str}*  
-*阅读次数: {article.view_count}*
-"""
+                        *本文由人民网爬虫系统自动采集整理*  
+                        *采集时间: {created_at_str}*  
+                        *阅读次数: {article.view_count}*
+                        """
         # 最后一步过滤（确保旧缓存中的推广内容被清理）
         markdown_content = filter_promo_content(markdown_content)
 

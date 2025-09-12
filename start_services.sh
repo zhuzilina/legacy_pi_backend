@@ -19,11 +19,25 @@ if ! command -v docker-compose > /dev/null 2>&1; then
     exit 1
 fi
 
+# 停止现有服务
+echo "🛑 停止现有服务..."
+docker-compose down --remove-orphans
+
 # 创建必要的目录
 echo "📁 创建必要的目录..."
 mkdir -p mongo-init
 mkdir -p media/md_docs/images
 mkdir -p media/tts
+
+# 检查是否有旧镜像文件
+IMAGE_NAME="legacy_pi_backend_django-app:latest"
+if [[ "$(docker images -q ${IMAGE_NAME} 2> /dev/null)" != "" ]]; then
+    echo "发现 Docker 镜像 '${IMAGE_NAME}'。正在删除..."
+    docker rmi ${IMAGE_NAME}
+    echo "镜像 '${IMAGE_NAME}' 已成功删除。"
+else
+    echo "Docker 镜像 '${IMAGE_NAME}' 不存在，无需任何操作。"
+fi
 
 # 启动服务
 echo "🐳 启动 Docker 服务..."
@@ -52,7 +66,7 @@ fi
 
 # 检查 Django 应用
 echo "🔍 检查 Django 应用..."
-if curl -f http://localhost:8000/api/ai-chat/health/ > /dev/null 2>&1; then
+if curl -f http://localhost/api/ai-chat/health/ > /dev/null 2>&1; then
     echo "✅ Django 应用正常"
 else
     echo "❌ Django 应用异常"

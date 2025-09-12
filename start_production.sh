@@ -28,6 +28,16 @@ chmod +x start_production.sh
 echo "🛑 停止现有服务..."
 docker-compose down --remove-orphans
 
+# 检查是否有旧镜像文件
+IMAGE_NAME="legacy_pi_backend_django-app:latest"
+if [[ "$(docker images -q ${IMAGE_NAME} 2> /dev/null)" != "" ]]; then
+    echo "发现 Docker 镜像 '${IMAGE_NAME}'。正在删除..."
+    docker rmi ${IMAGE_NAME}
+    echo "镜像 '${IMAGE_NAME}' 已成功删除。"
+else
+    echo "Docker 镜像 '${IMAGE_NAME}' 不存在，无需任何操作。"
+fi
+
 # 清理Docker缓存和镜像
 echo "🧹 清理Docker缓存..."
 docker system prune -f

@@ -1,19 +1,19 @@
+import shutil
+import tempfile
+from httpcore import TimeoutException
 import requests
 import re
 import time
 import logging
-import html as html_lib
 from datetime import datetime
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup, Comment
 from django.utils import timezone
-from django.conf import settings
 from .redis_models import RedisNewsArticle, RedisCrawlTask
 from .utils import convert_to_markdown, extract_images, clean_text
 from .image_service import image_cache_service
@@ -42,6 +42,7 @@ class PeopleNetCrawler:
     
     def crawl_today_news(self, task_id=None):
         """爬取今日要闻 (新版：直接从目标URL获取)"""
+        logger.info("开始执行")
         try:
             # 目标URL
             target_url = "http://www.people.com.cn/GB/59476/index.html"
@@ -134,44 +135,48 @@ class PeopleNetCrawler:
                 'message': error_msg
             }
     
-    def _get_tody_news_url(self,url,target_date):
+    def _get_tody_news_url(self, url, target_date):
         """
-        爬取今日要闻所有文章的链接。
-
-        参数:
-            url (str): 想要爬取的网站的URL。
-            target_data (int): 目标日期的天数。
-
-        返回:
-            str: 网站源代码。
+        爬取今日要闻所有文章的链接（适配两种页面模式）。
         """
-        # 创建一个 Options 对象
         chrome_options = Options()
-        # 添加无头模式参数
+        user_data_dir = tempfile.mkdtemp()
+        chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
         chrome_options.add_argument("--headless")
-        # 附加推荐参数（在某些服务器环境下可以避免奇怪的问题）
-        chrome_options.add_argument("--disable-gpu") # 禁用GPU硬件加速。在无头模式下通常是推荐的。
-        chrome_options.add_argument("--no-sandbox") # 在Linux服务器上运行时，有时需要此参数来解决权限问题。
-        chrome_options.add_argument("--window-size=1920,1080") # 设置一个固定的窗口大小，避免因默认窗口过小导致某些元素不可见。
-        # 初始化webdriver
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--window-size=1920,1080")
+        
         driver = webdriver.Chrome(options=chrome_options)
-        # 记录原始窗口的句柄
         original_window = driver.current_window_handle
+        
         try:
-            # 1. 发送HTTP请求-进入日历页
+            # 1. 访问初始 URL
             driver.get(url)
 
-            # 检查请求是否成功 (状态码 200 表示成功)
-            print("页面初次加载，等待 JavaScript 跳转...")
-            time.sleep(2) # 等待2秒，比JS的1秒要长
-
+            # --- 新增的验证步骤 ---
+            # 验证导航是否成功，我们期望 URL 包含 'people.com.cn'
+            # 我们给一个合理的等待时间，比如 15 秒
+            WebDriverWait(driver, 15).until(
+                EC.url_contains("people.com.cn")
+            )
+            print(f"成功导航到页面，当前 URL: {driver.current_url}")
+            # --- 验证结束 ---
+            
+            print("页面初次加载...")
+            
+            # --- 核心逻辑：判断页面模式 ---
             try:
-                # 等待 iframe 出现并切换进去
-                iframe = WebDriverWait(driver, 10).until(
+                # 尝试执行“模式 A”：寻找并点击 iframe 中的日历
+                # 我们给一个较短的等待时间，比如5秒。如果5秒内 iframe 没出现，就认为它不会出现了。
+                print("正在尝试检测 iframe 日历模式...")
+                iframe = WebDriverWait(driver, 5).until(
                     EC.presence_of_element_located((By.TAG_NAME, "iframe"))
                 )
                 driver.switch_to.frame(iframe)
-                print("已切换到 iframe 内部。")
+                print("检测到 iframe，已切换。")
+                
                 print(f"正在查找并点击日期 '{target_date}' 的链接...")
                 date_link_xpath = f"//a[font/text()='{target_date}']"
                 date_link = WebDriverWait(driver, 10).until(
@@ -179,31 +184,49 @@ class PeopleNetCrawler:
                 )
                 date_link.click()
                 print("成功点击日期链接。")
-                # 等待新窗口出现
-                WebDriverWait(driver, 10).until(EC.number_of_windows_to_be(2))
 
-                print("正在切换到新打开的新闻列表标签页...")
+                # 等待并切换到新打开的新闻列表窗口
+                WebDriverWait(driver, 10).until(EC.number_of_windows_to_be(2))
                 for window_handle in driver.window_handles:
                     if window_handle != original_window:
                         driver.switch_to.window(window_handle)
                         break
-                
-                print(f"已切换到新窗口，URL: {driver.current_url}")
+                print("已成功切换到新闻列表标签页。")
 
-                # 等待新闻列表的关键元素 <td class="p6"> 加载完成
-                wait = WebDriverWait(driver, 10)
-                wait.until(EC.presence_of_element_located((By.CLASS_NAME, "p6")))
-                print("新闻列表页面加载完成！")
-            except Exception as e:
-                print(f"未找到或无法切换到 iframe，将在主页面继续操作。错误: {e}")
+            except TimeoutException:
+                # 如果5秒内没有找到 iframe，捕获 TimeoutException 异常
+                # 这意味着我们很可能处于“模式 B”：直接进入了新闻列表
+                print("未在规定时间内检测到 iframe，假定已直接进入新闻列表页面。")
+                # 不需要做任何额外操作，driver 已经停留在正确的页面上
 
-            # 2. 获取HTML内容
+            # --- 通用逻辑：此时无论哪种模式，都应该在新闻列表页了 ---
+            print(f"当前所在页面 URL: {driver.current_url}")
+            print("等待新闻列表加载...")
+            
+            # 等待新闻列表的关键元素加载完成
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CLASS_NAME, "p6"))
+            )
+            print("新闻列表页面加载完成！")
+
+            # 2. 获取并解析 HTML 内容
             page_source = driver.page_source
-            return self._parse_news_data(page_source)
+            return self._parse_news_data(page_source) 
+
         except Exception as e:
-            print(f"发生错误: {e}")
+            print(f"在爬取过程中发生未知错误: {e}")
+            # 保存截图对于调试非常有帮助
+            driver.save_screenshot('error_screenshot.png')
+            print("已保存错误截图 'error_screenshot.png'")
+            return None # 或者重新抛出异常
         finally:
-            driver.quit()
+            if 'driver' in locals() and driver:
+                driver.quit()
+            if 'user_data_dir' in locals() and user_data_dir:
+                try:
+                    shutil.rmtree(user_data_dir)
+                except OSError as e:
+                    print(f"清理临时目录失败: {e.strerror}")
     
     def _parse_news_data(self,html_content):
         """
@@ -252,12 +275,25 @@ class PeopleNetCrawler:
             try:
                 # 创建一个 Options 对象
                 chrome_options = Options()
+                # 为 driver 实例创建一个唯一的临时目录
+                # user_data_dir = tempfile.mkdtemp()
+                # chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
                 # 添加无头模式参数
                 chrome_options.add_argument("--headless")
-                # 附加推荐参数（在某些服务器环境下可以避免奇怪的问题）
-                chrome_options.add_argument("--disable-gpu") # 禁用GPU硬件加速。在无头模式下通常是推荐的。
-                chrome_options.add_argument("--no-sandbox") # 在Linux服务器上运行时，有时需要此参数来解决权限问题。
-                chrome_options.add_argument("--window-size=1920,1080") # 设置一个固定的窗口大小，避免因默认窗口过小导致某些元素不可见。
+                chrome_options.add_argument("--no-sandbox")
+                chrome_options.add_argument("--disable-dev-shm-usage")
+                chrome_options.add_argument("--disable-gpu")
+                chrome_options.add_argument("--window-size=1920,1080")
+                chrome_options.add_argument("--disable-extensions") # 禁用所有扩展
+                chrome_options.add_argument("--disable-infobars") # 禁用信息栏
+                chrome_options.add_argument("--disable-popup-blocking") # 禁用弹出窗口拦截
+                chrome_options.add_argument("--disable-notifications") # 禁用通知
+                chrome_options.add_argument("--disable-logging") # 禁用日志记录
+                chrome_options.add_argument("--log-level=3") # 设置日志级别为最高（最少日志）
+                chrome_options.add_argument("--silent") # 静默模式
+                chrome_options.add_argument("--ignore-certificate-errors") # 忽略证书错误
+                chrome_options.add_argument("--disk-cache-size=0") # 禁用磁盘缓存
+                chrome_options.add_argument("--media-cache-size=0") # 禁用媒体缓存
                 # 初始化webdriver
                 driver = webdriver.Chrome(options=chrome_options)
                 article_content = None
@@ -273,6 +309,7 @@ class PeopleNetCrawler:
                     if not article_content:
                         raise ValueError("错误：未能通过任何一种方法定位到文章内容。")
                     soup = BeautifulSoup(article_content, 'html.parser')
+                
                 except Exception as e:
                     print(f"发生错误: {e}")
                 finally:

@@ -190,3 +190,7 @@ MONGODB_PORT = int(os.environ.get('MONGODB_PORT', 27017))
 MONGODB_USERNAME = os.environ.get('MONGODB_USERNAME', 'admin')
 MONGODB_PASSWORD = os.environ.get('MONGODB_PASSWORD', 'password123')
 MONGODB_DATABASE = os.environ.get('MONGODB_DATABASE', 'md_docs')
+
+# celery配置
+CELERY_BROKER_URL = 'redis://:redis123@redis:6379/1'
+CELERY_RESULT_BACKEND = 'redis://:redis123@redis:6379/2' 
