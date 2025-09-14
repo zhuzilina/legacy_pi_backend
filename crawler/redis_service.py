@@ -76,22 +76,31 @@ class RedisService:
             return None
     
     def get_article(self, article_id):
-        """根据ID获取文章"""
+        """根据 ID 从 Redis 获取一篇文章的 Hash 数据"""
         try:
             key = f"article:{article_id}"
-            article_json = self.redis_client.get(key)
+            # 使用 HGETALL 来读取 Hash 类型
+            raw_data = self.redis_client.hgetall(key)
             
-            if article_json:
-                article_data = json.loads(article_json)
-                # 增加阅读量
-                article_data['view_count'] = article_data.get('view_count', 0) + 1
-                self.redis_client.set(key, json.dumps(article_data, ensure_ascii=False), ex=86400*2)
-                return article_data
-            else:
+            if not raw_data:
+                logger.warning(f"在 Redis 中未找到 Hash key: '{key}'")
                 return None
-                
+
+            # 对从 Redis 直接获取的数据，进行反序列化
+            processed_data = raw_data
+            image_mapping_field = processed_data.get('image_mapping')
+            if image_mapping_field:
+                try:
+                    processed_data['image_mapping'] = json.loads(image_mapping_field)
+                except (json.JSONDecodeError, TypeError):
+                    processed_data['image_mapping'] = {}
+            
+            return processed_data
+        except redis.exceptions.ResponseError as e:
+            logger.error(f"Redis WRONGTYPE 错误, key '{key}': {e}.")
+            return None
         except Exception as e:
-            logger.error(f"获取文章失败: {str(e)}")
+            logger.error(f"Redis 获取文章失败, key '{key}': {repr(e)}", exc_info=True)
             return None
     
     def get_daily_articles(self, date=None):
