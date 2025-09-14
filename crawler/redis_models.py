@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import datetime
+from datetime import date, datetime
 from django.utils import timezone
 from .redis_service import redis_service
 
@@ -27,33 +27,53 @@ class RedisNewsArticle:
         self.word_count = kwargs.get('word_count', 0)
         self.image_count = kwargs.get('image_count', 0)
         self.image_mapping = kwargs.get('image_mapping', {})  # 图片映射关系
+        self.crawl_date = kwargs.get('crawl_date',timezone.now().date())
     
     def to_dict(self):
         """转换为字典"""
+        # 辅助函数，确保任何值都能安全地转换为字符串
+        def safe_serialize(value):
+            if isinstance(value, (datetime, date)):
+                return value.isoformat()
+            if isinstance(value, (dict, list)):
+                return json.dumps(value, ensure_ascii=False)
+            if value is None:
+                return ""
+            return str(value) # 兜底策略
         return {
-            'id': self.id,
-            'title': self.title,
-            'url': self.url,
-            'source': self.source,
-            'publish_date': self.publish_date.isoformat() if isinstance(self.publish_date, datetime) else self.publish_date,
-            'content': self.content,
-            'markdown_content': self.markdown_content,
-            'summary': self.summary,
-            'category': self.category,
-            'tags': self.tags,
-            'created_at': self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at,
-            'updated_at': self.updated_at.isoformat() if isinstance(self.updated_at, datetime) else self.updated_at,
-            'crawl_status': self.crawl_status,
-            'view_count': self.view_count,
-            'word_count': self.word_count,
-            'image_count': self.image_count,
-            'image_mapping': self.image_mapping
+            'id': safe_serialize(self.id),
+            'title': safe_serialize(self.title),
+            'url': safe_serialize(self.url),
+            'source': safe_serialize(self.source),
+            'publish_date': safe_serialize(self.publish_date),
+            'content': safe_serialize(self.content),
+            'markdown_content': safe_serialize(self.markdown_content),
+            'summary': safe_serialize(self.summary),
+            'category': safe_serialize(self.category),
+            'tags': safe_serialize(self.tags),
+            'created_at': safe_serialize(self.created_at),
+            'updated_at': safe_serialize(self.updated_at),
+            'crawl_status': safe_serialize(self.crawl_status),
+            'view_count': safe_serialize(self.view_count),
+            'word_count': safe_serialize(self.word_count),
+            'image_count': safe_serialize(self.image_count),
+            'image_mapping': safe_serialize(self.image_mapping),
+            'crawl_date': safe_serialize(self.crawl_date),
         }
     
     @classmethod
     def from_dict(cls, data):
         """从字典创建实例"""
-        return cls(**data)
+        processed_data = data.copy() # 创建副本以安全修改
+        # 尝试将 image_mapping 字段从 JSON 字符串转回 dict
+        # 反序列化 image_mapping
+        image_mapping_val = processed_data.get('image_mapping')
+        if isinstance(image_mapping_val, str) and image_mapping_val:
+            try:
+                processed_data['image_mapping'] = json.loads(image_mapping_val)
+            except (json.JSONDecodeError, TypeError):
+                processed_data['image_mapping'] = {}
+        return cls(**processed_data)
     
     def save(self):
         """保存到Redis"""
@@ -91,34 +111,33 @@ class RedisNewsArticle:
     
     @classmethod
     def filter(cls, **kwargs):
-        """过滤文章"""
+        """过滤文章 (带有详细的调试日志)"""
         try:
-            # 支持的过滤条件
-            category = kwargs.get('category')
+            logger.info(f"MODEL.filter: Called with kwargs: {kwargs}")
+
+            crawl_date = kwargs.get('crawl_date')
             crawl_status = kwargs.get('crawl_status')
-            date = kwargs.get('date')
             
-            if category:
-                article_ids = redis_service.get_articles_by_category(category)
-            elif date:
-                article_ids = redis_service.get_daily_articles(date)
-            else:
-                # 默认获取今日文章
-                article_ids = redis_service.get_daily_articles()
+            article_ids = redis_service.get_article_ids_by_filter(
+                crawl_date=crawl_date,
+                crawl_status=crawl_status
+            )
+            logger.info(f"MODEL.filter: get_article_ids_by_filter returned {len(article_ids)} IDs. Sample: {article_ids[:5]}")
             
-            articles = []
-            for article_id in article_ids:
-                article_data = redis_service.get_article(article_id)
-                if article_data:
-                    # 应用额外的过滤条件
-                    if crawl_status and article_data.get('crawl_status') != crawl_status:
-                        continue
-                    articles.append(cls.from_dict(article_data))
+            if not article_ids:
+                logger.info("MODEL.filter: No article IDs found, returning empty list.")
+                return []
+                
+            articles_data = redis_service.get_articles_batch(article_ids)
+            logger.info(f"MODEL.filter: get_articles_batch returned {len(articles_data)} article data dicts.")
             
-            return articles
+            result = [cls.from_dict(data) for data in articles_data if data]
+            logger.info(f"MODEL.filter: Final result contains {len(result)} article objects. Returning now.")
+            
+            return result
             
         except Exception as e:
-            logger.error(f"过滤文章失败: {str(e)}")
+            logger.error(f"MODEL.filter: An exception occurred: {repr(e)}", exc_info=True)
             return []
     
     @classmethod

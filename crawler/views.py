@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import logging
 import threading
@@ -17,22 +18,6 @@ from .tasks import run_daily_crawler_task
 
 logger = logging.getLogger(__name__)
 
-# def run_daily_crawler():
-        #     try:
-        #         crawler = PeopleNetCrawler()
-        #         result = crawler.crawl_today_news(task_id=task.id)
-        #         logger.info(f"每日爬取任务完成: {result}")
-        #         redis_service.set_daily_crawl_status('completed')
-        #     except Exception as e:
-        #         logger.error(f"每日爬取任务失败: {str(e)}")
-        #         redis_service.set_daily_crawl_status('failed')
-        #     finally:
-        #         # 释放锁
-        #         redis_service.release_daily_crawl_lock()
-
-        # thread = threading.Thread(target=run_daily_crawler)
-        # thread.daemon = True
-        # thread.start()
 @csrf_exempt
 @require_http_methods(["GET"])
 def get_daily_articles(request):
@@ -40,19 +25,25 @@ def get_daily_articles(request):
     获取当日文章ID列表
     首次请求时触发爬取，返回所有文章ID
     """
+    logger.info(f"API VIEW: get_daily_articles received a request. PID is [{os.getpid()}]")
     try:
-        today = timezone.now().date()
+        today_date_obj = timezone.now().date()
+        today_str = today_date_obj.isoformat()
+
         status = redis_service.get_daily_crawl_status()
 
         # 尝试获取已成功的文章
-        today_article_ids = RedisNewsArticle.filter(crawl_status='success')
-        today_article_ids = [article.id for article in today_article_ids]
+        today_articles = RedisNewsArticle.filter(
+            crawl_date=today_str, 
+            crawl_status='success'
+        )
+        today_article_ids = [article.id for article in today_articles]
 
         if today_article_ids:
             # 如果有成功的数据，直接返回
             return JsonResponse({
                 'msg': 'success',
-                'crawl_date': today.strftime('%Y-%m-%d'),
+                'crawl_date': today_date_obj.strftime('%Y-%m-%d'),
                 'total_articles': len(today_article_ids),
                 'article_ids': today_article_ids,
                 'status': 'completed' # 状态可以叫 completed 或 cached
@@ -62,7 +53,7 @@ def get_daily_articles(request):
         if status == 'running':
             return JsonResponse({
                 'msg': 'crawling_in_progress',
-                'crawl_date': today.strftime('%Y-%m-%d'),
+                'crawl_date': today_date_obj.strftime('%Y-%m-%d'),
                 'status': 'crawling',
                 'message': '每日文章正在爬取中，请稍后重试。'
             })
@@ -70,7 +61,7 @@ def get_daily_articles(request):
         if status == 'failed':
             return JsonResponse({
                 'msg': 'crawl_failed',
-                'crawl_date': today.strftime('%Y-%m-%d'),
+                'crawl_date': today_date_obj.strftime('%Y-%m-%d'),
                 'status': 'failed',
                 'message': '今日文章爬取失败，请联系管理员。'
             }, status=500)
@@ -78,7 +69,7 @@ def get_daily_articles(request):
         # 默认情况，例如任务还未开始
         return JsonResponse({
             'msg': 'no_data_yet',
-            'crawl_date': today.strftime('%Y-%m-%d'),
+            'crawl_date': today_date_obj.strftime('%Y-%m-%d'),
             'status': 'pending',
             'message': '今日文章尚未开始爬取或暂无数据。'
         })

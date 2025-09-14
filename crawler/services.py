@@ -1,21 +1,13 @@
-import shutil
-import tempfile
-from httpcore import TimeoutException
 import requests
 import re
 import time
 import logging
 from datetime import datetime
 from urllib.parse import urljoin
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup, Comment
 from django.utils import timezone
 from .redis_models import RedisNewsArticle, RedisCrawlTask
-from .utils import convert_to_markdown, extract_images, clean_text
+from .utils import convert_to_markdown, extract_images, clean_text, get_encoding
 from .image_service import image_cache_service
 
 logger = logging.getLogger(__name__)
@@ -139,96 +131,26 @@ class PeopleNetCrawler:
         """
         爬取今日要闻所有文章的链接（适配两种页面模式）。
         """
-        chrome_options = Options()
-        user_data_dir = tempfile.mkdtemp()
-        chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
-        chrome_options.add_argument("--headless")
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--window-size=1920,1080")
-        
-        driver = webdriver.Chrome(options=chrome_options)
-        original_window = driver.current_window_handle
         
         try:
-            # 1. 访问初始 URL
-            driver.get(url)
-
-            # --- 新增的验证步骤 ---
-            # 验证导航是否成功，我们期望 URL 包含 'people.com.cn'
-            # 我们给一个合理的等待时间，比如 15 秒
-            WebDriverWait(driver, 15).until(
-                EC.url_contains("people.com.cn")
-            )
-            print(f"成功导航到页面，当前 URL: {driver.current_url}")
-            # --- 验证结束 ---
+            today_str = datetime.now().strftime('%Y%m%d')
+            # 注意：这里我们假设爬取的就是当天的，如果需要爬取特定日期，请修改这里的逻辑
+            url = f"http://www.people.com.cn/GB/59476/review/{today_str}.html"
             
-            print("页面初次加载...")
+            logger.info(f"尝试直接请求新闻列表 URL: {url}")
+            response = self.session.get(url, timeout=20)
+            response.raise_for_status() # 确保请求成功 (状态码 200)
             
-            # --- 核心逻辑：判断页面模式 ---
-            try:
-                # 尝试执行“模式 A”：寻找并点击 iframe 中的日历
-                # 我们给一个较短的等待时间，比如5秒。如果5秒内 iframe 没出现，就认为它不会出现了。
-                print("正在尝试检测 iframe 日历模式...")
-                iframe = WebDriverWait(driver, 5).until(
-                    EC.presence_of_element_located((By.TAG_NAME, "iframe"))
-                )
-                driver.switch_to.frame(iframe)
-                print("检测到 iframe，已切换。")
-                
-                print(f"正在查找并点击日期 '{target_date}' 的链接...")
-                date_link_xpath = f"//a[font/text()='{target_date}']"
-                date_link = WebDriverWait(driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH, date_link_xpath))
-                )
-                date_link.click()
-                print("成功点击日期链接。")
+            detected_encoding = get_encoding(response)
+            logger.info(f"为列表页 {url} 检测到编码: {detected_encoding}")
+            soup = BeautifulSoup(response.content, 'html.parser', from_encoding=detected_encoding)
+            return self._parse_news_data(soup)
 
-                # 等待并切换到新打开的新闻列表窗口
-                WebDriverWait(driver, 10).until(EC.number_of_windows_to_be(2))
-                for window_handle in driver.window_handles:
-                    if window_handle != original_window:
-                        driver.switch_to.window(window_handle)
-                        break
-                print("已成功切换到新闻列表标签页。")
-
-            except TimeoutException:
-                # 如果5秒内没有找到 iframe，捕获 TimeoutException 异常
-                # 这意味着我们很可能处于“模式 B”：直接进入了新闻列表
-                print("未在规定时间内检测到 iframe，假定已直接进入新闻列表页面。")
-                # 不需要做任何额外操作，driver 已经停留在正确的页面上
-
-            # --- 通用逻辑：此时无论哪种模式，都应该在新闻列表页了 ---
-            print(f"当前所在页面 URL: {driver.current_url}")
-            print("等待新闻列表加载...")
-            
-            # 等待新闻列表的关键元素加载完成
-            WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CLASS_NAME, "p6"))
-            )
-            print("新闻列表页面加载完成！")
-
-            # 2. 获取并解析 HTML 内容
-            page_source = driver.page_source
-            return self._parse_news_data(page_source) 
-
-        except Exception as e:
-            print(f"在爬取过程中发生未知错误: {e}")
-            # 保存截图对于调试非常有帮助
-            driver.save_screenshot('error_screenshot.png')
-            print("已保存错误截图 'error_screenshot.png'")
-            return None # 或者重新抛出异常
-        finally:
-            if 'driver' in locals() and driver:
-                driver.quit()
-            if 'user_data_dir' in locals() and user_data_dir:
-                try:
-                    shutil.rmtree(user_data_dir)
-                except OSError as e:
-                    print(f"清理临时目录失败: {e.strerror}")
+        except requests.RequestException as e:
+            logger.error(f"使用 requests 获取链接列表失败: {e}", exc_info=True)
+            return None
     
-    def _parse_news_data(self,html_content):
+    def _parse_news_data(self, soup):
         """
         专门解析人民网历史回顾页面的HTML，提取“新闻排行榜”和“今日要闻”的标题和数据。
 
@@ -239,11 +161,11 @@ class PeopleNetCrawler:
             dict: 一个字典，包含两个键 "news_ranking" 和 "todays_news"，
                 它们的值都是一个列表，列表中的每个元素是包含 'title' 和 'url' 的字典。
         """
-        if not html_content:
+        if not soup:
             print("错误：传入的 HTML 内容为空。")
             return {"news_ranking": [], "todays_news": []}
 
-        soup = BeautifulSoup(html_content, 'html.parser')
+        soup = soup
 
         # --- 提取“今日要闻” ---
         todays_news_list = []
@@ -273,50 +195,14 @@ class PeopleNetCrawler:
             logger.info(f"开始从这里获取文章：{url}")
             # 尝试从网站获取内容
             try:
-                # 创建一个 Options 对象
-                chrome_options = Options()
-                # 为 driver 实例创建一个唯一的临时目录
-                # user_data_dir = tempfile.mkdtemp()
-                # chrome_options.add_argument(f"--user-data-dir={user_data_dir}")
-                # 添加无头模式参数
-                chrome_options.add_argument("--headless")
-                chrome_options.add_argument("--no-sandbox")
-                chrome_options.add_argument("--disable-dev-shm-usage")
-                chrome_options.add_argument("--disable-gpu")
-                chrome_options.add_argument("--window-size=1920,1080")
-                chrome_options.add_argument("--disable-extensions") # 禁用所有扩展
-                chrome_options.add_argument("--disable-infobars") # 禁用信息栏
-                chrome_options.add_argument("--disable-popup-blocking") # 禁用弹出窗口拦截
-                chrome_options.add_argument("--disable-notifications") # 禁用通知
-                chrome_options.add_argument("--disable-logging") # 禁用日志记录
-                chrome_options.add_argument("--log-level=3") # 设置日志级别为最高（最少日志）
-                chrome_options.add_argument("--silent") # 静默模式
-                chrome_options.add_argument("--ignore-certificate-errors") # 忽略证书错误
-                chrome_options.add_argument("--disk-cache-size=0") # 禁用磁盘缓存
-                chrome_options.add_argument("--media-cache-size=0") # 禁用媒体缓存
-                # 初始化webdriver
-                driver = webdriver.Chrome(options=chrome_options)
-                article_content = None
-                # 初始化变量以存储提取的内容
-                try:
-                    # 1. 发送HTTP请求
-                    driver.get(url)
-                    # 2. 获取HTML内容
-                    page_source = driver.page_source
-                    # 3.提取文章结构部分
-                    article_content = self._extract_article_content(page_source)
-                    
-                    if not article_content:
-                        raise ValueError("错误：未能通过任何一种方法定位到文章内容。")
-                    soup = BeautifulSoup(article_content, 'html.parser')
-                
-                except Exception as e:
-                    print(f"发生错误: {e}")
-                finally:
-                    driver.quit()
-                    
-            except Exception as e:
-                logger.error(f"无法获取文章网页内容: {link_info['title']} - {str(e)}")
+                response = self.session.get(url, timeout=10)
+                response.raise_for_status() # 如果状态码不是200，则抛出异常
+                detected_encoding = get_encoding(response)
+                logger.info(f"为文章页 {url} 检测到编码: {detected_encoding}")
+                html_soup = BeautifulSoup(response.content, 'html.parser', from_encoding=detected_encoding)
+                soup = self._extract_article_content(html_soup)
+            except requests.RequestException as e:
+                logger.warning(f"使用 requests 获取 {url} 失败: {e}")
             
             # 如果无法从网站获取内容，跳过这篇文章
             if soup is None:
@@ -354,7 +240,7 @@ class PeopleNetCrawler:
             logger.error(f"爬取文章详情时出错 {link_info['url']}: {str(e)}")
             return None
     
-    def _extract_article_content(self,page_source):
+    def _extract_article_content(self,soup):
         """
         从HTML源码中智能提取主要文章内容的函数。
         它会按顺序尝试多种策略，一旦成功即返回结果。
@@ -365,7 +251,7 @@ class PeopleNetCrawler:
         返回:
             str: 格式化后的文章内容HTML，如果所有策略都失败则返回None。
         """
-        soup = BeautifulSoup(page_source, 'html.parser')
+        soup = soup
         
         # 策略 1: 精确查找 '<!--内容-->' 注释标记。
         # 这种模式下，内容通常在注释标记下方的第一个div的第一个子div中。
@@ -377,7 +263,7 @@ class PeopleNetCrawler:
                 article_div = content_wrapper_div.find('div', recursive=False)
                 if article_div:
                     print("信息：通过 '<!--内容-->' (策略1) 成功提取。")
-                    return article_div.prettify()
+                    return article_div
 
         # 策略 2: 精确查找 '<!--结束正文-->' 注释标记。
         # 这种模式下，文章内容就是注释标记紧邻的前一个div。
@@ -661,6 +547,7 @@ class PeopleNetCrawler:
         try:
             # 创建Redis文章实例
             article = RedisNewsArticle(
+                crawl_date=timezone.now().date().isoformat(),
                 title=article_data['title'],
                 url=article_data['url'],
                 source=article_data['source'],

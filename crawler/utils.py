@@ -2,6 +2,67 @@ import re
 import html
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
+import logging
+import requests
+import charset_normalizer
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+def get_encoding(response: requests.Response) -> str:
+    """
+    智能检测 requests.Response 对象的编码。
+    
+    优先级顺序:
+    1. 从 HTTP headers 的 Content-Type 中获取 charset。
+    2. 从 HTML 内容的 <meta> 标签中获取 charset。
+    3. 使用 charset_normalizer 库进行启发式分析。
+    4. 如果全部失败，回退到 'utf-8'。
+    
+    :param response: requests 的 Response 对象。
+    :return: 检测到的编码字符串。
+    """
+    # 优先级 1: 检查 HTTP 响应头
+    content_type = response.headers.get('Content-Type', '').lower()
+    match = re.search(r'charset=([\w-]+)', content_type)
+    if match:
+        encoding = match.group(1)
+        logger.debug(f"从 HTTP Header 中检测到编码: {encoding}")
+        return encoding
+
+    # 优先级 2: 检查 HTML meta 标签
+    # 我们只解码前 2KB 内容来查找 meta 标签，这样效率更高
+    # 使用 'latin-1' 解码是安全的，因为它能映射所有字节，不会抛出错误
+    html_head_sample = response.content[:2048].decode('latin-1')
+    
+    # 匹配 <meta charset="utf-8">
+    match = re.search(r'<meta.*?charset=[\'"]?([\w-]+)', html_head_sample, re.I)
+    if match:
+        encoding = match.group(1)
+        logger.debug(f"从 HTML <meta charset> 标签中检测到编码: {encoding}")
+        return encoding
+        
+    # 匹配 <meta http-equiv="Content-Type" content="text/html; charset=gb2312">
+    match = re.search(r'<meta.*?content=[\'"]?.*?charset=([\w-]+)', html_head_sample, re.I)
+    if match:
+        encoding = match.group(1)
+        logger.debug(f"从 HTML <meta http-equiv> 标签中检测到编码: {encoding}")
+        return encoding
+
+    # 优先级 3: 使用 charset_normalizer 进行启发式分析
+    try:
+        results = charset_normalizer.from_bytes(response.content)
+        best_match = results.best()
+        if best_match:
+            encoding = best_match.encoding
+            logger.debug(f"通过 charset_normalizer 启发式分析检测到编码: {encoding}")
+            return encoding
+    except Exception as e:
+        logger.warning(f"charset_normalizer 分析失败: {e}")
+
+    # 优先级 4: 回退到默认值
+    logger.warning("所有编码检测方法均失败，回退到默认编码 'utf-8'")
+    return 'utf-8'
 
 def clean_text(text):
     """清理文本内容"""

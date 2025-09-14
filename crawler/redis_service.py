@@ -1,3 +1,4 @@
+import os
 import redis
 import json
 import logging
@@ -24,6 +25,11 @@ class RedisService:
             redis_config['password'] = redis_password
         
         self.redis_client = redis.Redis(**redis_config)
+
+        logger.info(
+            f"RedisService Initialized in PID [{os.getpid()}]: "
+            f"Connecting to DB [{self.redis_client.connection_pool.connection_kwargs.get('db')}]"
+        )
         
     def test_connection(self):
         """测试Redis连接"""
@@ -36,35 +42,37 @@ class RedisService:
     
     # 文章相关操作
     def save_article(self, article_data):
-        """保存文章到Redis"""
+        """保存文章 Hash，并为其创建索引。"""
         try:
-            article_id = article_data.get('id') or self._generate_article_id()
-            article_data['id'] = article_id
-            article_data['created_at'] = datetime.now().isoformat()
-            article_data['updated_at'] = datetime.now().isoformat()
-            
-            # 将文章数据序列化为JSON
-            article_json = json.dumps(article_data, ensure_ascii=False)
-            
-            # 保存文章数据
+            article_id = article_data.get('id')
+
             key = f"article:{article_id}"
-            self.redis_client.set(key, article_json, ex=86400*2)  # 2天过期
-            
-            # 添加到今日文章列表
-            today = timezone.now().date().isoformat()
-            self.redis_client.sadd(f"daily_articles:{today}", article_id)
-            self.redis_client.expire(f"daily_articles:{today}", 86400*2)  # 2天过期
-            
-            # 添加到按分类索引
-            category = article_data.get('category', 'unknown')
-            self.redis_client.sadd(f"category:{category}", article_id)
-            self.redis_client.expire(f"category:{category}", 86400*2)
+
+            # 使用 pipeline 保证原子性
+            with self.redis_client.pipeline() as pipe:
+                # 1. 保存文章主体数据 (Hash)
+                pipe.hset(key, mapping=article_data)
+                
+                # 2. (核心) 创建或更新索引 (Sets)
+                crawl_date = article_data.get('crawl_date')
+                crawl_status = article_data.get('crawl_status')
+                
+                if crawl_date:
+                    # 按日期索引
+                    pipe.sadd(f"index:crawl_date:{crawl_date}", article_id)
+                if crawl_status:
+                    # 按状态索引
+                    pipe.sadd(f"index:crawl_status:{crawl_status}", article_id)
+                if crawl_date and crawl_status:
+                    # (最重要) 创建联合索引！
+                    pipe.sadd(f"index:date_status:{crawl_date}:{crawl_status}", article_id)
+                
+                pipe.execute()
             
             logger.info(f"文章已保存到Redis: {article_id}")
             return article_id
-            
         except Exception as e:
-            logger.error(f"保存文章到Redis失败: {str(e)}")
+            logger.error(f"Redis 保存文章失败: {e}")
             return None
     
     def get_article(self, article_id):
@@ -336,6 +344,52 @@ class RedisService:
         except Exception as e:
             logger.error(f"清空数据库失败: {str(e)}")
             return False
+    
+    def get_article_ids_by_filter(self, crawl_date=None, crawl_status=None):
+        """根据索引高效地获取文章ID (带有详细的调试日志)"""
+        try:
+            if crawl_date and crawl_status:
+                index_key = f"index:date_status:{crawl_date}:{crawl_status}"
+                # --- 添加这条“黑匣子”日志 ---
+                logger.info(f"SERVICE.get_ids: Querying index with key: '{index_key}'")
+                
+                raw_ids_set = self.redis_client.smembers(index_key)
+                # --- 添加这条“黑匣子”日志 ---
+                logger.info(f"SERVICE.get_ids: self.redis.smembers for key '{index_key}' returned {len(raw_ids_set)} raw items.")
+                
+                return list(raw_ids_set)
+            
+            # ... (其他分支保持不变) ...
+            return []
+        except Exception as e:
+            logger.error(f"SERVICE.get_ids: An exception occurred: {repr(e)}", exc_info=True)
+            return []
+        
+    def get_articles_batch(self, article_ids):
+        """使用 pipeline 批量获取多个文章的 Hash 数据。"""
+        try:
+            with self.redis_client.pipeline() as pipe:
+                for article_id in article_ids:
+                    pipe.hgetall(f"article:{article_id}")
+                results = pipe.execute()
+            
+            # 将 Redis 返回的字节字典解码为字符串字典
+            articles_data = []
+            for raw_data in results:
+                if raw_data:
+                    decoded_data = raw_data
+                    image_mapping_field = decoded_data.get('image_mapping')
+                    if image_mapping_field and isinstance(image_mapping_field, str):
+                        try:
+                            decoded_data['image_mapping'] = json.loads(image_mapping_field)
+                        except (json.JSONDecodeError,TypeError):
+                            decoded_data['image_mapping'] = {}
+                    
+                    articles_data.append(decoded_data)
+            return [data for data in results if data]
+        except Exception as e:
+            logger.error(f"Redis 批量获取文章失败: {e}")
+            return []
 
 # 全局Redis服务实例
 redis_service = RedisService()

@@ -92,25 +92,6 @@ else:
 echo "📁 收集静态文件..."
 docker-compose exec django-app python manage.py collectstatic --noinput
 
-# 清理Redis缓存
-echo "🧹 清理Redis缓存..."
-docker-compose exec django-app python manage.py shell -c "
-import redis
-from django.conf import settings
-try:
-    redis_client = redis.Redis(
-        host=getattr(settings, 'REDIS_HOST', 'localhost'),
-        port=getattr(settings, 'REDIS_PORT', 6379),
-        db=getattr(settings, 'REDIS_DB', 0),
-        password=getattr(settings, 'REDIS_PASSWORD', 'redis123'),
-        decode_responses=True
-    )
-    redis_client.flushdb()
-    print('✅ Redis缓存已清理')
-except Exception as e:
-    print(f'⚠️ Redis缓存清理失败: {e}')
-"
-
 # 清理Django缓存
 echo "🧹 清理Django缓存..."
 docker-compose exec django-app python manage.py shell -c "
@@ -183,7 +164,7 @@ fi
 echo "缓存清理验证:"
 echo "测试crawler API (应该返回新数据):"
 crawler_response=$(curl -s http://localhost/api/crawler/daily/)
-if echo "$crawler_response" | grep -q "crawling\|cached\|fresh"; then
+if echo "$crawler_response" | grep -q "crawling\|cached\|success"; then
     echo "✅ Crawler API正常响应"
     echo "响应: $crawler_response"
 else
@@ -224,4 +205,5 @@ echo "🧹 缓存清理命令:"
 echo "  - 清理Redis缓存: docker-compose exec django-app python manage.py shell -c \"import redis; redis.Redis(host='redis', port=6379, db=0, password='redis123').flushdb()\""
 echo "  - 清理Django缓存: docker-compose exec django-app python manage.py shell -c \"from django.core.cache import cache; cache.clear()\""
 echo "  - 重置crawler状态: curl -X POST http://localhost/api/crawler/reset/"
+echo "  - 重新启动crawler: docker-compose exec django-app python manage.py start_daily_crawl"
 echo "  - 清理Nginx缓存: docker-compose restart nginx"

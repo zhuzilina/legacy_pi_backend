@@ -38,7 +38,6 @@ services:
     build: .
     container_name: legacy_pi_django
     restart: unless-stopped
-    shm_size: '2gb'
     expose:
       - "8000"
     environment:
