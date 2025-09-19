@@ -29,7 +29,7 @@ def get_documents_by_category(request):
         category = request.GET.get('category', '')
         
         # 验证类别
-        valid_categories = ['spirit', 'person', 'party_history']
+        valid_categories = ['spirit', 'person', 'party_history', 'journey', 'scenic']
         if category and category not in valid_categories:
             return JsonResponse({
                 'msg': 'error',
@@ -106,17 +106,21 @@ def get_document_status(request):
         spirit_count = MDDocument.objects.filter(category='spirit', is_published=True).count()
         person_count = MDDocument.objects.filter(category='person', is_published=True).count()
         party_history_count = MDDocument.objects.filter(category='party_history', is_published=True).count()
-        
+        journey_count = MDDocument.objects.filter(category='journey', is_published=True).count()
+        scenic_count = MDDocument.objects.filter(category='scenic', is_published=True).count()
+
         # 获取最近更新的文档
         recent_document = MDDocument.objects.filter(is_published=True).order_by('-updated_at').first()
-        
+
         return JsonResponse({
             'msg': 'success',
             'total_documents': total_documents,
             'category_stats': {
                 'spirit': spirit_count,
                 'person': person_count,
-                'party_history': party_history_count
+                'party_history': party_history_count,
+                'journey': journey_count,
+                'scenic': scenic_count
             },
             'recent_update': recent_document.updated_at.isoformat() if recent_document else None,
             'system_status': 'running'
@@ -183,7 +187,7 @@ def upload_document(request):
                 }, status=400)
         
         # 验证类别
-        valid_categories = ['spirit', 'person', 'party_history']
+        valid_categories = ['spirit', 'person', 'party_history', 'journey', 'scenic']
         if data['category'] not in valid_categories:
             return JsonResponse({
                 'msg': 'error',

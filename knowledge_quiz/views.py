@@ -328,23 +328,121 @@ def upload_question(request):
 
 
 @csrf_exempt
+@require_http_methods(["GET"])
+def get_questions_by_category(request):
+    """根据知识分类获取所有题目ID"""
+    try:
+        # 获取查询参数
+        category = request.GET.get('category')
+
+        if not category:
+            return JsonResponse({
+                'success': False,
+                'error': '缺少分类参数'
+            }, status=400)
+
+        # 验证分类参数
+        valid_categories = ['party_history', 'theory']
+        if category not in valid_categories:
+            return JsonResponse({
+                'success': False,
+                'error': f'无效的分类: {category}'
+            }, status=400)
+
+        # 获取该分类下的所有题目ID
+        questions = Question.objects.filter(category=category).values('id', 'question_type', 'difficulty')
+
+        return JsonResponse({
+            'success': True,
+            'data': {
+                'category': category,
+                'category_display': dict(Question.CATEGORY_CHOICES).get(category, category),
+                'total_count': len(questions),
+                'question_ids': list(questions)
+            }
+        })
+
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'error': str(e)
+        }, status=500)
+
+
+@csrf_exempt
+@require_http_methods(["GET"])
+def get_question_detail(request, question_id):
+    """根据题目ID获取题目详细内容"""
+    try:
+        question = Question.objects.get(id=question_id)
+
+        # 构建基础题目数据
+        question_data = {
+            'id': question.id,
+            'question_text': question.question_text,
+            'question_type': question.question_type,
+            'question_type_display': dict(Question.QUESTION_TYPE_CHOICES).get(question.question_type, question.question_type),
+            'difficulty': question.difficulty,
+            'difficulty_display': dict(Question.DIFFICULTY_CHOICES).get(question.difficulty, question.difficulty),
+            'category': question.category,
+            'category_display': question.get_category_display(),
+            'tags': question.get_tags_list(),
+            'explanation': question.explanation,
+            'created_at': question.created_at.isoformat(),
+            'updated_at': question.updated_at.isoformat(),
+        }
+
+        # 根据题目类型添加详细信息
+        if question.is_choice_question():
+            # 选择题：包含选项和正确答案
+            question_data.update({
+                'options': question.get_options_display(),
+                'correct_options': question.get_correct_options(),
+                'correct_answer_text': question.get_correct_answer_text(),
+            })
+        elif question.is_fill_question():
+            # 填空题：包含正确答案
+            question_data.update({
+                'correct_answer': question.correct_answer,
+                'correct_answers_list': question.get_correct_answers_list(),
+                'correct_answer_text': question.get_correct_answer_text(),
+            })
+
+        return JsonResponse({
+            'success': True,
+            'data': question_data
+        })
+
+    except Question.DoesNotExist:
+        return JsonResponse({
+            'success': False,
+            'error': '题目不存在'
+        }, status=404)
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'error': str(e)
+        }, status=500)
+
+
+@csrf_exempt
 @require_http_methods(["POST"])
 def batch_upload_questions(request):
     """批量上传题目"""
     try:
         data = json.loads(request.body)
         questions_data = data.get('questions', [])
-        
+
         if not questions_data:
             return JsonResponse({
                 'success': False,
                 'error': '没有提供题目数据'
             }, status=400)
-        
+
         success_count = 0
         failed_count = 0
         errors = []
-        
+
         with transaction.atomic():
             for i, question_data in enumerate(questions_data):
                 try:
@@ -353,23 +451,23 @@ def batch_upload_questions(request):
                     for field in required_fields:
                         if field not in question_data or not question_data[field]:
                             raise ValueError(f'缺少必填字段: {field}')
-                    
+
                     # 验证题目类型
                     valid_question_types = ['choice_single', 'choice_multiple', 'fill']
                     if question_data['question_type'] not in valid_question_types:
                         raise ValueError(f'无效的题目类型: {question_data["question_type"]}')
-                    
+
                     # 验证分类
                     valid_categories = ['party_history', 'theory']
                     if question_data['category'] not in valid_categories:
                         raise ValueError(f'无效的分类: {question_data["category"]}')
-                    
+
                     # 验证难度
                     valid_difficulties = ['easy', 'medium', 'hard']
                     difficulty = question_data.get('difficulty', 'medium')
                     if difficulty not in valid_difficulties:
                         raise ValueError(f'无效的难度: {difficulty}')
-                    
+
                     # 创建题目
                     question = Question.objects.create(
                         question_text=question_data['question_text'],
@@ -379,36 +477,36 @@ def batch_upload_questions(request):
                         explanation=question_data.get('explanation', ''),
                         tags=question_data.get('tags', '')
                     )
-                    
+
                     # 处理选择题选项
                     if question_data['question_type'] in ['choice_single', 'choice_multiple']:
                         options = question_data.get('options', [])
                         if not options:
                             raise ValueError('选择题必须提供选项')
-                        
+
                         # 验证选项格式
                         for j, option in enumerate(options):
                             if not isinstance(option, dict) or 'text' not in option:
                                 raise ValueError(f'选项 {j+1} 格式错误')
-                        
+
                         question.options = options
                         question.save()
-                    
+
                     # 处理填空题答案
                     elif question_data['question_type'] == 'fill':
                         correct_answer = question_data.get('correct_answer', '')
                         if not correct_answer:
                             raise ValueError('填空题必须提供正确答案')
-                        
+
                         question.correct_answer = correct_answer
                         question.save()
-                    
+
                     success_count += 1
-                    
+
                 except Exception as e:
                     failed_count += 1
                     errors.append(f'题目 {i+1}: {str(e)}')
-        
+
         return JsonResponse({
             'success': True,
             'data': {
@@ -418,7 +516,7 @@ def batch_upload_questions(request):
                 'errors': errors
             }
         })
-    
+
     except json.JSONDecodeError:
         return JsonResponse({
             'success': False,

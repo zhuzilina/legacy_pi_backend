@@ -10,6 +10,8 @@ class MDDocument(models.Model):
         ('spirit', '精神'),
         ('person', '人物'),
         ('party_history', '党史'),
+        ('journey', '征程'),
+        ('scenic', '景观'),
     ]
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

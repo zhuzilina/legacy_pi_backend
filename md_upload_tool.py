@@ -40,15 +40,15 @@ class MDUploadTool:
     def upload_md_document(self, md_file_path, category, title=None, author=None, source=None, publish_date=None):
         """
         上传MD文档
-        
+
         Args:
             md_file_path: MD文件路径
-            category: 文档类别 (spirit, person, party_history)
+            category: 文档类别 (spirit, person, party_history, journey, scenic)
             title: 文档标题（如果不提供，从MD文件第一行提取）
             author: 作者
             source: 来源
             publish_date: 发布日期 (YYYY-MM-DD格式)
-        
+
         Returns:
             dict: 上传结果
         """
@@ -315,7 +315,7 @@ def main():
     parser = argparse.ArgumentParser(description='MD文档上传工具')
     parser.add_argument('--server', required=True, help='服务器地址 (必填)')
     parser.add_argument('--api-key', help='API密钥')
-    parser.add_argument('--category', required=True, choices=['spirit', 'person', 'party_history'], help='文档类别')
+    parser.add_argument('--category', required=True, choices=['spirit', 'person', 'party_history', 'journey', 'scenic'], help='文档类别')
     parser.add_argument('--author', help='作者')
     parser.add_argument('--source', help='来源')
     parser.add_argument('--publish-date', help='发布日期 (YYYY-MM-DD)')
