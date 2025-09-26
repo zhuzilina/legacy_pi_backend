@@ -7,6 +7,42 @@ set -e
 
 echo "🚀 启动 Legacy PI Backend 生产环境..."
 
+# 检查是否启用强制清理
+FORCE_CLEANUP=false
+if [[ "$1" == "--force-cleanup" || "$1" == "-f" ]]; then
+    FORCE_CLEANUP=true
+    echo "⚠️  强制清理模式已启用，将清除所有数据"
+fi
+
+# 检查数据卷是否存在
+check_data_volumes() {
+    local mongodb_exists=false
+    local postgresql_exists=false
+
+    if docker volume ls | grep -q "legacy_pi_backend_mongodb_data"; then
+        mongodb_exists=true
+    fi
+
+    if docker volume ls | grep -q "legacy_pi_backend_postgresql_data"; then
+        postgresql_exists=true
+    fi
+
+    echo "📊 数据卷状态检查:"
+    echo "  MongoDB: $([ "$mongodb_exists" = true ] && echo "✅ 存在" || echo "❌ 不存在")"
+    echo "  PostgreSQL: $([ "$postgresql_exists" = true ] && echo "✅ 存在" || echo "❌ 不存在")"
+
+    if [ "$mongodb_exists" = true ] || [ "$postgresql_exists" = true ]; then
+        if [ "$FORCE_CLEANUP" = false ]; then
+            echo "🛡️  检测到现有数据，将保护现有数据不被清除"
+            return 0
+        else
+            echo "🗑️  强制清理模式：将清除所有现有数据"
+            return 1
+        fi
+    fi
+    return 0
+}
+
 # 检查环境变量
 if [ -z "$ARK_API_KEY" ]; then
     echo "⚠️  警告: 未设置 ARK_API_KEY 环境变量"
@@ -17,7 +53,7 @@ fi
 
 # 创建必要的目录
 echo "📁 创建必要的目录..."
-mkdir -p media/md_docs/images media/tts static logs
+mkdir -p media/md_docs/images media/tts static logs postgresql-init
 
 # 设置权限
 echo "🔐 设置文件权限..."
@@ -41,13 +77,21 @@ fi
 # 清理Docker缓存和镜像
 echo "🧹 清理Docker缓存..."
 docker system prune -f
-docker volume prune -f
 
-# 清理本地缓存
+# 根据清理模式决定是否清除数据卷
+if check_data_volumes; then
+    echo "🛡️  保护现有数据卷，只清理未使用的 volumes"
+    docker volume prune -f
+else
+    echo "🗑️  强制清理模式：清除所有数据卷"
+    docker volume prune -f
+fi
+
+# 清理本地缓存（保留媒体文件中的数据）
 echo "🧹 清理本地缓存..."
 rm -rf static/*
-rm -rf media/md_docs/images/*
 rm -rf logs/*.log
+echo "💾 保留 media 目录中的用户数据"
 
 # 构建和启动服务
 echo "🔨 构建和启动服务..."
@@ -71,11 +115,14 @@ from django.db import connection
 cursor = connection.cursor()
 tables = ['django_session', 'auth_user', 'django_admin_log', 'md_documents', 'md_images']
 for table in tables:
-    cursor.execute(f\"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'\")
-    if cursor.fetchone():
-        print(f'✅ 表 {table} 存在')
-    else:
-        print(f'❌ 表 {table} 不存在')
+    try:
+        cursor.execute(f\"SELECT table_name FROM information_schema.tables WHERE table_name = '{table}'\")
+        if cursor.fetchone():
+            print(f'✅ 表 {table} 存在')
+        else:
+            print(f'❌ 表 {table} 不存在')
+    except Exception as e:
+        print(f'❌ 检查表 {table} 时出错: {e}')
 "
 
 echo "👤 检查超级用户..."
@@ -190,6 +237,7 @@ echo "  - 主应用 (通过 Nginx): http://localhost"
 echo "  - API 文档: http://localhost/api/"
 echo "  - 管理后台: http://localhost/admin/"
 echo "  - MongoDB 管理: http://localhost:8081"
+echo "  - PostgreSQL 数据库: localhost:5432 (用户名: postgresuser, 密码: postgres123)"
 echo ""
 echo "📝 日志查看:"
 echo "  - 查看所有服务日志: docker-compose logs -f"
@@ -207,3 +255,8 @@ echo "  - 清理Django缓存: docker-compose exec django-app python manage.py sh
 echo "  - 重置crawler状态: curl -X POST http://localhost/api/crawler/reset/"
 echo "  - 重新启动crawler: docker-compose exec django-app python manage.py start_daily_crawl"
 echo "  - 清理Nginx缓存: docker-compose restart nginx"
+echo ""
+echo "📝 使用说明:"
+echo "  - 正常启动: ./start_production.sh"
+echo "  - 强制清理: ./start_production.sh --force-cleanup 或 ./start_production.sh -f"
+echo "  - 强制清理将清除所有数据卷和数据库数据，请谨慎使用！"

@@ -1,3 +1,5 @@
+# pip-tools
+pip_tools==7.5.0
 # Web Framework
 Django==5.2.5
 
@@ -10,6 +12,7 @@ aiohttp==3.12.15
 # Database and Cache
 pymongo==4.14.1
 redis==6.4.0
+psycopg2-binary==2.9.10
 
 # Task Queue
 celery==5.5.3

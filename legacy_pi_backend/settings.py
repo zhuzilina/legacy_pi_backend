@@ -82,11 +82,25 @@ WSGI_APPLICATION = 'legacy_pi_backend.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
+# PostgreSQL配置
+POSTGRES_HOST = os.environ.get('POSTGRES_HOST', 'localhost')
+POSTGRES_PORT = int(os.environ.get('POSTGRES_PORT', 5432))
+POSTGRES_DB = os.environ.get('POSTGRES_DB', 'legacy_pi_db')
+POSTGRES_USER = os.environ.get('POSTGRES_USER', 'postgresuser')
+POSTGRES_PASSWORD = os.environ.get('POSTGRES_PASSWORD', 'postgres123')
+
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'HOST': POSTGRES_HOST,
+        'PORT': POSTGRES_PORT,
+        'NAME': POSTGRES_DB,
+        'USER': POSTGRES_USER,
+        'PASSWORD': POSTGRES_PASSWORD,
+        'OPTIONS': {
+            'client_encoding': 'UTF8',
+        },
     }
 }
 

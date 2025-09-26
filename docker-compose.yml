@@ -34,6 +34,22 @@ services:
     networks:
       - legacy_pi_network
 
+  postgresql:
+    image: postgres:16
+    container_name: legacy_pi_postgresql
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: legacy_pi_db
+      POSTGRES_USER: postgresuser
+      POSTGRES_PASSWORD: postgres123
+    volumes:
+      - postgresql_data:/var/lib/postgresql/data
+      - ./postgresql-init:/docker-entrypoint-initdb.d
+    networks:
+      - legacy_pi_network
+
   django-app:
     build: .
     container_name: legacy_pi_django
@@ -51,6 +67,11 @@ services:
       - MONGODB_USERNAME=admin
       - MONGODB_PASSWORD=password123
       - MONGODB_DATABASE=md_docs
+      - POSTGRES_HOST=postgresql
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=legacy_pi_db
+      - POSTGRES_USER=postgresuser
+      - POSTGRES_PASSWORD=postgres123
       - ARK_API_KEY=${ARK_API_KEY:-your_api_key_here}
     volumes:
       - ./media:/app/media
@@ -60,6 +81,8 @@ services:
       redis:
         condition: service_healthy
       mongodb:
+        condition: service_started
+      postgresql:
         condition: service_started
     networks:
       - legacy_pi_network
@@ -101,6 +124,8 @@ services:
 
 volumes:
   mongodb_data:
+    driver: local
+  postgresql_data:
     driver: local
   redis_data:
     driver: local
