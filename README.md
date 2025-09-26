@@ -39,6 +39,7 @@ Legacy PI Backend 是一个基于 Django 的智能内容处理平台，集成了
 |------|------|------|------|
 | **Nginx** | 反向代理和静态文件服务 | 80, 443 | ✅ 生产就绪 |
 | **Django + uWSGI** | 主应用服务 | 8000 (内部) | ✅ 多进程并发 |
+| **PostgreSQL** | 主数据库 | 5432 | ✅ 生产就绪 |
 | **Redis 缓存** | 数据缓存服务 | 6379 | ✅ 高性能缓存 |
 | **MongoDB** | 文档数据库 | 27017 | ✅ 文档存储 |
 | **Mongo Express** | 数据库管理界面 | 8081 | ✅ 管理界面 |
@@ -71,9 +72,64 @@ cd legacy_pi_backend
 # 设置环境变量
 export ARK_API_KEY="你的火山方舟API密钥"
 
-# 启动所有服务
+# 启动所有服务（开发环境）
 ./start_services.sh
+
+# 生产环境部署
+./start_production.sh
 ```
+
+#### 📝 启动脚本说明
+
+**开发环境启动脚本 (`start_services.sh`)**
+- **用途**: 开发环境快速启动
+- **数据保护**: ✅ 默认保护现有数据
+- **端口**: Django 8000, Nginx 80/443
+- **服务**: 启动所有基础服务
+
+**生产环境启动脚本 (`start_production.sh`)**
+- **用途**: 生产环境完整部署
+- **优化**: ✅ 包含性能优化和监控
+- **数据迁移**: ✅ 自动数据库迁移
+- **健康检查**: ✅ 完整的服务验证
+
+#### 🔧 强制清理模式
+
+当需要完全重新部署时，可以使用强制清理模式：
+
+```bash
+# 开发环境强制清理
+./start_services.sh --force-cleanup
+# 或
+./start_services.sh -f
+
+# 生产环境强制清理
+./start_production.sh --force-cleanup
+# 或
+./start_production.sh -f
+```
+
+**⚠️ 注意事项**:
+- 强制清理模式将清除**所有数据库数据**和**缓存数据**
+- 包括 PostgreSQL、MongoDB、Redis 的所有数据
+- 请谨慎使用，确保已备份重要数据
+- 适用于首次部署或需要完全重置的场景
+
+#### 🛡️ 数据保护机制
+
+系统内置数据保护功能：
+
+1. **自动检测**: 检测现有数据卷是否包含数据
+2. **智能保护**: 默认保护现有数据库数据
+3. **明确提示**: 清理前显示数据状态和清理模式
+4. **安全确认**: 强制清理需要明确的参数确认
+
+**数据保护范围**:
+- ✅ PostgreSQL 数据库 (`legacy_pi_backend_postgresql_data`)
+- ✅ MongoDB 数据库 (`legacy_pi_backend_mongodb_data`)
+- ✅ 用户上传的媒体文件 (`media/` 目录)
+- ❌ Redis 缓存数据（可安全清除）
+- ❌ 静态文件和日志（可安全清除）
 
 ### 验证部署
 
@@ -147,15 +203,24 @@ python manage.py runserver
 # AI 服务配置
 ARK_API_KEY=你的方舟API密钥
 
-# 数据库配置
+# PostgreSQL 数据库配置
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_DB=legacy_pi_db
+POSTGRES_USER=postgresuser
+POSTGRES_PASSWORD=postgres123
+
+# Redis 缓存配置
 REDIS_HOST=localhost
 REDIS_PORT=6379
 REDIS_PASSWORD=redis123
 
+# MongoDB 文档数据库配置
 MONGODB_HOST=localhost
 MONGODB_PORT=27017
 MONGODB_USERNAME=admin
 MONGODB_PASSWORD=password123
+MONGODB_DATABASE=md_docs
 ```
 
 ## 📊 功能特性详解
@@ -182,6 +247,28 @@ MONGODB_PASSWORD=password123
 
 ### 服务管理
 
+#### 🚀 推荐启动方式
+
+**开发环境**：
+```bash
+# 正常启动（保护现有数据）
+./start_services.sh
+
+# 强制清理启动（清除所有数据）
+./start_services.sh --force-cleanup
+```
+
+**生产环境**：
+```bash
+# 正常启动（保护现有数据）
+./start_production.sh
+
+# 强制清理启动（清除所有数据）
+./start_production.sh --force-cleanup
+```
+
+#### 🔧 手动管理命令
+
 ```bash
 # 启动服务
 docker-compose up -d
@@ -194,29 +281,65 @@ docker-compose restart
 
 # 查看日志
 docker-compose logs -f
+
+# 查看特定服务日志
+docker-compose logs -f django-app
+docker-compose logs -f nginx
+docker-compose logs -f postgresql
 ```
 
 ### 数据管理
 
 ```bash
-# 备份数据
-docker-compose exec redis redis-cli -a redis123 --rdb /data/backup.rdb
+# PostgreSQL 数据备份
+docker-compose exec postgresql pg_dump -U postgresuser -d legacy_pi_db > backup.sql
+
+# PostgreSQL 数据恢复
+docker-compose exec -i postgresql psql -U postgresuser -d legacy_pi_db < backup.sql
+
+# MongoDB 数据备份
 docker-compose exec mongodb mongodump --out /data/backup
 
-# 清理缓存
+# MongoDB 数据恢复
+docker-compose exec mongodb mongorestore /data/backup
+
+# Redis 缓存备份
+docker-compose exec redis redis-cli -a redis123 --rdb /data/backup.rdb
+
+# 清理缓存（安全操作）
 docker-compose exec redis redis-cli -a redis123 FLUSHALL
 ```
+
+#### 🛡️ 数据安全最佳实践
+
+1. **定期备份**: 设置定时任务备份 PostgreSQL 和 MongoDB
+2. **验证备份**: 定期测试备份文件的恢复能力
+3. **监控存储**: 监控数据卷使用情况，避免空间不足
+4. **访问控制**: 限制数据库访问权限，使用强密码
+5. **版本管理**: 重要数据变更前进行备份
 
 ### 监控检查
 
 ```bash
-# 健康检查
+# 应用健康检查
 curl http://localhost/api/ai-chat/health/
+
+# 数据库服务检查
 docker-compose exec redis redis-cli -a redis123 ping
+docker-compose exec postgresql psql -U postgresuser -d legacy_pi_db -c "SELECT 1;"
 docker-compose exec mongodb mongosh --eval "db.runCommand('ping')"
+
+# 服务状态
+docker-compose ps
 
 # 资源监控
 docker stats
+
+# 查看容器日志
+docker-compose logs -f django-app
+docker-compose logs -f postgresql
+docker-compose logs -f redis
+docker-compose logs -f mongodb
 ```
 
 ## 📚 详细文档
